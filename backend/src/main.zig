@@ -17,18 +17,31 @@ fn getRandomName() []const u8 {
     return NAMES[idx];
 }
 
-fn readFile(allocator: std.mem.Allocator, rel_path: []const u8) ![]u8 {
+fn readFile(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
     const cwd = std.Io.Dir.cwd();
     const io = std.Io.Threaded.global_single_threaded.io();
-    const file = try cwd.openFile(io, rel_path, .{});
-    defer file.close(io);
 
-    const size = try file.length(io);
-    const buf = try allocator.alloc(u8, @intCast(size));
-    errdefer allocator.free(buf);
+    const candidates = [_][]const u8{ "public", "static", "frontend/static", "." };
+    var path_buf: [256]u8 = undefined;
 
-    _ = try file.readPositionalAll(io, buf, 0);
-    return buf;
+    for (candidates) |dir_prefix| {
+        const full_path = if (std.mem.eql(u8, dir_prefix, "."))
+            filename
+        else
+            std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_prefix, filename }) catch continue;
+
+        if (cwd.openFile(io, full_path, .{})) |file| {
+            defer file.close(io);
+            const size = try file.length(io);
+            const buf = try allocator.alloc(u8, @intCast(size));
+            errdefer allocator.free(buf);
+
+            _ = try file.readPositionalAll(io, buf, 0);
+            return buf;
+        } else |_| {}
+    }
+
+    return error.FileNotFound;
 }
 
 pub fn main() !void {
@@ -137,13 +150,13 @@ fn handleConnection(allocator: std.mem.Allocator, client_fd: i32) !void {
 
     // Handle Static File Serving
     if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
-        try serveStaticFile(allocator, client_fd, "frontend/static/index.html", "text/html; charset=utf-8", is_head);
+        try serveStaticFile(allocator, client_fd, "index.html", "text/html; charset=utf-8", is_head);
     } else if (std.mem.eql(u8, path, "/bridge.js")) {
-        try serveStaticFile(allocator, client_fd, "frontend/static/bridge.js", "application/javascript", is_head);
+        try serveStaticFile(allocator, client_fd, "bridge.js", "application/javascript", is_head);
     } else if (std.mem.eql(u8, path, "/style.css")) {
-        try serveStaticFile(allocator, client_fd, "frontend/static/style.css", "text/css", is_head);
+        try serveStaticFile(allocator, client_fd, "style.css", "text/css", is_head);
     } else if (std.mem.eql(u8, path, "/app.wasm")) {
-        try serveStaticFile(allocator, client_fd, "frontend/static/app.wasm", "application/wasm", is_head);
+        try serveStaticFile(allocator, client_fd, "app.wasm", "application/wasm", is_head);
     } else {
         const not_found =
             "HTTP/1.1 404 Not Found\r\n" ++
