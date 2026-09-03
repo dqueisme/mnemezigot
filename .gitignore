@@ -7,10 +7,20 @@ zig-out/
 zig-pkg/
 
 # ==========================================
-# Third-party Dependencies
+# Third-party Dependencies & Worktrees
 # ==========================================
 deps/
 vendor/
+worktrees/
+.worktrees/
+
+# ==========================================
+# Database Files
+# ==========================================
+data/
+*.db
+*.db-wal
+*.db-shm
 
 # ==========================================
 # Compiled WASM Output
