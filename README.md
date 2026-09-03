@@ -16,13 +16,14 @@ mnemezigot/
 ├── proto/
 │   └── service.proto       # Protobuf & RPC service definition
 ├── frontend/
+│   ├── STYLEGUIDE.md       # Panduan styling & konvensi CSS (Do & Don't)
 │   ├── src/
 │   │   └── main.zig        # Frontend logic di-compile ke WebAssembly (WASM)
 │   └── static/
-│       ├── index.html      # UI page
+│       ├── index.html      # Clean semantic HTML
 │       ├── bridge.js       # JS runtime bridge untuk WebAssembly & gRPC fetch
-│       ├── style.css       # UI Styling
-│       └── app.wasm        # Output kompilasi WASM
+│       ├── style.css       # UI Styling terpusat (CSS variables & semantic classes)
+│       └── app.wasm        # Output kompilasi WASM (ReleaseSmall: 2.5 KB)
 └── backend/
     └── src/
         └── main.zig        # Native Zig server (HTTP static files + gRPC-Web dispatcher)
@@ -55,16 +56,62 @@ mnemezigot/
 
 ---
 
-## 🚀 Cara Menjalankan
+## 🎨 Panduan Styling & CSS (Do & Don't)
 
-### 1. Build WASM & Server
+Project ini menggunakan pendekatan **Semantic Component-Based CSS** (mirip Bootstrap/BEM) untuk menjaga file HTML tetap bersih, rapi, dan mudah dibaca tanpa pencemaran *utility-class soup*.
+
+### ✅ DO (Harus Dilakukan)
+1. **Gunakan Semantic Class Names**: Beri nama class berdasarkan fungsi komponen (`.card`, `.primary-btn`, `.badge`, `.status-box`).
+2. **Pusatkan Warna di CSS Variables (`:root`)**: Selalu gunakan `var(--primary)`, `var(--card-bg)`, `var(--border)` untuk mempermudah retheming.
+3. **Gunakan Modifier Class untuk State / Varian**: Contoh `.primary-btn.btn--secondary`, `.is-loading`, `.is-active`.
+4. **Jaga HTML Tetap Minimalis**: HTML hanya berisi struktur konten dan semantic class hooks yang stabil.
+5. **Manipulasi State via Class / Atribut**: WASM / JS cukup me-toggle class (misal `classList.toggle('is-loading')`) atau atribut `disabled`.
+
+### ❌ DON'T (Harus Dihindari)
+1. **DILARANG Utility-Class Soup di HTML**: Hindari menumpuk 10+ utility class (seperti gaya Tailwind) di satu elemen HTML.
+2. **DILARANG Inline Styles**: Hindari atribut `style="..."` di elemen HTML.
+3. **DILARANG Hardcode Hex Warna Berulang**: Jangan menulis `#f97316` berulang kali; gunakan `var(--primary)`.
+4. **DILARANG Injeksi CSS String dari WASM**: Jangan kirim string CSS inline dari WebAssembly ke JS.
+5. **DILARANG Penggunaan `!important`**: Rancang selector class tunggal yang bersih.
+
+> 📖 Panduan lengkap dan contoh komponen dapat dilihat di **[`frontend/STYLEGUIDE.md`](file:///home/aripseprudin/workspace/mnemezigot/frontend/STYLEGUIDE.md)**.
+
+---
+
+## 🚀 Cara Build & Menjalankan
+
+### 1. Build Proyek
 ```bash
 zig build
+```
+Hasil build akan terkumpul secara otomatis di folder **`zig-out/`**:
+```
+zig-out/
+├── server                  # Binary executable backend
+└── public/                 # Folder aset statis frontend
+    ├── app.wasm            # Binary WebAssembly (2.5 KB)
+    ├── bridge.js           # JS runtime bridge
+    ├── index.html          # Web UI
+    └── style.css           # Styling
 ```
 
 ### 2. Jalankan Server
 ```bash
 zig build run
 ```
+Atau jalankan langsung binary di folder `zig-out/`:
+```bash
+cd zig-out && ./server
+```
 
-Buka browser di: [http://localhost:8080](http://localhost:8080)
+Buka browser di: **[http://localhost:8080](http://localhost:8080)**
+
+---
+
+## 📦 Distribusi ke User (Packaging)
+
+Untuk mengirimkan aplikasi ke user akhir dalam bentuk ZIP:
+```bash
+cd zig-out && zip -r ../aplikasi.zip * && cd ..
+```
+User cukup mengekstrak `aplikasi.zip` dan menjalankan `./server`.
