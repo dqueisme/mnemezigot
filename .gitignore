@@ -1,0 +1,42 @@
+# ==========================================
+# Zig Build & Cache Artifacts
+# ==========================================
+.zig-cache/
+zig-cache/
+zig-out/
+
+# ==========================================
+# Compiled WASM Output
+# ==========================================
+frontend/static/app.wasm
+frontend/static/*.wasm.map
+
+# ==========================================
+# Operating System Files
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==========================================
+# IDE & Editor Configurations
+# ==========================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# Logs & Environment Files
+# ==========================================
+*.log
+.env
+.env.*
+!.env.example

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zig 0.16 + WASM + gRPC Demo</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="badge">Zig 0.16 • WebAssembly • gRPC-Web</div>
+      <h1 id="greeting">Loading WASM...</h1>
+      <p class="subtitle">Tekan tombol di bawah untuk mengambil nama acak dari Zig Backend Server via gRPC.</p>
+      
+      <button id="btn-fetch" class="primary-btn" disabled>
+        <span class="btn-icon">⚡</span>
+        <span class="btn-text">Ambil Data Acak</span>
+      </button>
+
+      <div class="status-box" id="status-log">
+        <div class="status-header">Console Logs:</div>
+        <div class="status-content" id="log-entries"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/bridge.js"></script>
+</body>
+</html>

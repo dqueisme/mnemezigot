@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package hello;
+
+// Request message (empty for getting a random name)
+message RandomNameRequest {}
+
+// Response message containing the random name
+message RandomNameResponse {
+  string name = 1;
+}
+
+// Service definition
+service NameService {
+  rpc GetRandomName (RandomNameRequest) returns (RandomNameResponse);
+}

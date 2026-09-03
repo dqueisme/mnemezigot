@@ -1,0 +1,13 @@
+.{
+    .name = .mnemezigot,
+    .version = "0.1.0",
+    .fingerprint = 0x74b8ff9c1199098b,
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "frontend",
+        "backend",
+        "proto",
+    },
+}
