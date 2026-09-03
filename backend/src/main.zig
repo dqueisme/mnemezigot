@@ -141,7 +141,7 @@ pub fn main() !void {
     var server = try httpz.Server(void).init(io, allocator, .{
         .address = .localhost(8080),
         .workers = .{
-            .count = @intCast(@min(cpu_count, 32)),
+            .count = @intCast(cpu_count),
             .max_conn = 16384,
             .large_buffer_count = 2048,
             .large_buffer_size = 4096,
