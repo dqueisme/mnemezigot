@@ -2,15 +2,23 @@ syntax = "proto3";
 
 package hello;
 
-// Request message (empty for getting a random name)
-message RandomNameRequest {}
+// Request message (empty for getting a random user)
+message RandomUserRequest {}
 
-// Response message containing the random name
-message RandomNameResponse {
-  string name = 1;
+// Response message containing full user identity from SQLite with 1M rows
+message RandomUserResponse {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+  string phone = 4;
+  string address = 5;
+  string city = 6;
+  string job_title = 7;
+  int64 total_users_in_db = 8;
+  double query_time_ms = 9;
 }
 
 // Service definition
 service NameService {
-  rpc GetRandomName (RandomNameRequest) returns (RandomNameResponse);
+  rpc GetRandomUser (RandomUserRequest) returns (RandomUserResponse);
 }

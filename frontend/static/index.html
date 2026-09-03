@@ -1,30 +1,86 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Zig 0.16 + WASM + gRPC Demo</title>
-  <link rel="stylesheet" href="/style.css" />
+  <title>Zig 0.16 + SQLite (1M Rows) + WASM gRPC Demo</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="container">
-    <div class="card">
-      <div class="badge">Zig 0.16 • WebAssembly • gRPC-Web</div>
-      <h1 id="greeting">Loading WASM...</h1>
-      <p class="subtitle">Tekan tombol di bawah untuk mengambil nama acak dari Zig Backend Server via gRPC.</p>
-      
-      <button id="btn-fetch" class="primary-btn" disabled>
-        <span class="btn-icon">⚡</span>
-        <span class="btn-text">Ambil Data Acak</span>
-      </button>
+  <main class="app-container">
+    <header class="app-header">
+      <div class="header-tag">SQLite 3.46 In-Process Benchmark</div>
+      <h1 class="header-title">Database SQLite 1.000.000 Data</h1>
+      <p class="header-subtitle">
+        Aplikasi fullstack <strong>Zig 0.16 + WebAssembly + httpz + SQLite</strong>. Klik tombol untuk mengambil identitas user acak secara instan dari 1 juta baris data.
+      </p>
+    </header>
 
-      <div class="status-box" id="status-log">
-        <div class="status-header">Console Logs:</div>
-        <div class="status-content" id="log-entries"></div>
+    <!-- Metrics Bar -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <span class="metric-label">Ukuran Database</span>
+        <span class="metric-value" id="stat-total">1.000.000 Baris Data</span>
       </div>
-    </div>
-  </div>
+      <div class="metric-card">
+        <span class="metric-label">Latensi Query B-Tree</span>
+        <span class="metric-value metric-value--highlight" id="stat-latency">0.000 ms</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Arsitektur</span>
+        <span class="metric-value">WAL Mode + In-Process</span>
+      </div>
+    </section>
 
-  <script src="/bridge.js"></script>
+    <!-- User Identity Card -->
+    <section class="identity-card">
+      <div class="card-header">
+        <div class="avatar" id="user-initials">--</div>
+        <div class="user-meta">
+          <div class="user-name-row">
+            <h2 class="user-name" id="user-name">Memuat data...</h2>
+            <span class="badge badge--id" id="user-id">#0</span>
+          </div>
+          <div class="user-badges">
+            <span class="badge badge--primary" id="user-job">Pekerjaan</span>
+            <span class="badge badge--secondary" id="user-city">Kota</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="detail-row">
+          <span class="detail-label">Email</span>
+          <span class="detail-value" id="user-email">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Telepon</span>
+          <span class="detail-value" id="user-phone">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Alamat Lengkap</span>
+          <span class="detail-value" id="user-addr">-</span>
+        </div>
+      </div>
+
+      <div class="card-footer">
+        <button id="btn-fetch" class="primary-btn">
+          <span class="btn-text">🎲 Ambil User Acak Lainnya</span>
+          <span class="btn-spinner"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Console Log Panel -->
+    <section class="console-card">
+      <div class="console-header">
+        <span class="console-title">Live Execution Logs (gRPC-Web & SQLite)</span>
+        <span class="badge badge--live">LIVE</span>
+      </div>
+      <div id="log-entries" class="console-body"></div>
+    </section>
+  </main>
+
+  <script src="bridge.js"></script>
 </body>
 </html>
