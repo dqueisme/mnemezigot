@@ -1,6 +1,7 @@
 const std = @import("std");
 const httpz = @import("httpz");
 
+// 5 Pre-defined names
 const NAMES = [_][]const u8{
     "Andi",
     "Budi",
@@ -9,15 +10,54 @@ const NAMES = [_][]const u8{
     "Eko",
 };
 
-var prng = std.Random.DefaultPrng.init(0xCAFEBABE);
+// In-Memory Static Assets Cache (Zero Disk I/O during requests)
+var g_index_html: []const u8 = "";
+var g_bridge_js: []const u8 = "";
+var g_style_css: []const u8 = "";
+var g_app_wasm: []const u8 = "";
 
-fn getRandomName() []const u8 {
-    const rand = prng.random();
-    const idx = rand.uintLessThan(usize, NAMES.len);
-    return NAMES[idx];
+// Pre-computed gRPC-Web Frames (Zero Heap Allocation during requests)
+var g_grpc_responses: [5][]const u8 = undefined;
+
+// Fast Atomic Counter for Round-Robin / Random distribution (Thread-Safe & Lock-Free)
+var g_counter = std.atomic.Value(usize).init(0);
+
+fn buildGrpcFrame(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
+    const proto_len: u32 = @intCast(2 + name.len);
+    const data_frame_len = 5 + proto_len;
+
+    const trailer_text = "grpc-status: 0\r\ngrpc-message: OK\r\n";
+    const trailer_text_len: u32 = @intCast(trailer_text.len);
+    const trailer_frame_len = 5 + trailer_text_len;
+
+    const total_len = data_frame_len + trailer_frame_len;
+    const buf = try allocator.alloc(u8, total_len);
+
+    // Data frame header
+    buf[0] = 0x00; // uncompressed flag
+    buf[1] = @intCast((proto_len >> 24) & 0xFF);
+    buf[2] = @intCast((proto_len >> 16) & 0xFF);
+    buf[3] = @intCast((proto_len >> 8) & 0xFF);
+    buf[4] = @intCast(proto_len & 0xFF);
+
+    // Protobuf payload
+    buf[5] = 0x0A;
+    buf[6] = @intCast(name.len);
+    @memcpy(buf[7 .. 7 + name.len], name);
+
+    // Trailer frame header
+    const t_offset = data_frame_len;
+    buf[t_offset + 0] = 0x80; // trailer flag for grpc-web
+    buf[t_offset + 1] = @intCast((trailer_text_len >> 24) & 0xFF);
+    buf[t_offset + 2] = @intCast((trailer_text_len >> 16) & 0xFF);
+    buf[t_offset + 3] = @intCast((trailer_text_len >> 8) & 0xFF);
+    buf[t_offset + 4] = @intCast(trailer_text_len & 0xFF);
+    @memcpy(buf[t_offset + 5 .. t_offset + 5 + trailer_text_len], trailer_text);
+
+    return buf;
 }
 
-fn readFile(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
+fn readFileFromDisk(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
     const cwd = std.Io.Dir.cwd();
     const io = std.Io.Threaded.global_single_threaded.io();
 
@@ -44,90 +84,66 @@ fn readFile(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
     return error.FileNotFound;
 }
 
-fn serveStatic(res: *httpz.Response, filename: []const u8, content_type: []const u8) !void {
-    const content = readFile(res.arena, filename) catch {
-        res.status = 404;
-        res.body = "Not Found";
-        return;
-    };
-    res.header("Content-Type", content_type);
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Cache-Control", "no-cache");
-    res.body = content;
-}
-
+// Handlers (All pure in-memory zero-copy responses)
 fn handleIndex(_: *httpz.Request, res: *httpz.Response) !void {
-    try serveStatic(res, "index.html", "text/html; charset=utf-8");
+    res.header("Content-Type", "text/html; charset=utf-8");
+    res.header("Access-Control-Allow-Origin", "*");
+    res.body = g_index_html;
 }
 
 fn handleBridgeJs(_: *httpz.Request, res: *httpz.Response) !void {
-    try serveStatic(res, "bridge.js", "application/javascript");
+    res.header("Content-Type", "application/javascript");
+    res.header("Access-Control-Allow-Origin", "*");
+    res.body = g_bridge_js;
 }
 
 fn handleStyleCss(_: *httpz.Request, res: *httpz.Response) !void {
-    try serveStatic(res, "style.css", "text/css");
+    res.header("Content-Type", "text/css");
+    res.header("Access-Control-Allow-Origin", "*");
+    res.body = g_style_css;
 }
 
 fn handleAppWasm(_: *httpz.Request, res: *httpz.Response) !void {
-    try serveStatic(res, "app.wasm", "application/wasm");
+    res.header("Content-Type", "application/wasm");
+    res.header("Access-Control-Allow-Origin", "*");
+    res.body = g_app_wasm;
 }
 
 fn handleGrpcGetRandomName(_: *httpz.Request, res: *httpz.Response) !void {
-    const selected_name = getRandomName();
-    std.debug.print("🎲 [httpz] Picked random name: '{s}'\n", .{selected_name});
-
-    // 1. Encode Protobuf payload:
-    // message RandomNameResponse { string name = 1; }
-    // Tag: 0x0A, Len: name.len, Value: name bytes
-    const proto_len: u32 = @intCast(2 + selected_name.len);
-
-    // 2. Encode gRPC-Web data frame (5 bytes header + proto_buf)
-    const data_frame_len = 5 + proto_len;
-
-    // 3. Encode gRPC-Web trailer frame
-    const trailer_text = "grpc-status: 0\r\ngrpc-message: OK\r\n";
-    const trailer_text_len: u32 = @intCast(trailer_text.len);
-    const trailer_frame_len = 5 + trailer_text_len;
-
-    const total_body_len = data_frame_len + trailer_frame_len;
-    const body_buf = try res.arena.alloc(u8, total_body_len);
-
-    // Data frame header
-    body_buf[0] = 0x00; // uncompressed flag
-    body_buf[1] = @intCast((proto_len >> 24) & 0xFF);
-    body_buf[2] = @intCast((proto_len >> 16) & 0xFF);
-    body_buf[3] = @intCast((proto_len >> 8) & 0xFF);
-    body_buf[4] = @intCast(proto_len & 0xFF);
-
-    // Protobuf payload
-    body_buf[5] = 0x0A;
-    body_buf[6] = @intCast(selected_name.len);
-    @memcpy(body_buf[7 .. 7 + selected_name.len], selected_name);
-
-    // Trailer frame header
-    const t_offset = data_frame_len;
-    body_buf[t_offset + 0] = 0x80; // trailer flag for grpc-web
-    body_buf[t_offset + 1] = @intCast((trailer_text_len >> 24) & 0xFF);
-    body_buf[t_offset + 2] = @intCast((trailer_text_len >> 16) & 0xFF);
-    body_buf[t_offset + 3] = @intCast((trailer_text_len >> 8) & 0xFF);
-    body_buf[t_offset + 4] = @intCast(trailer_text_len & 0xFF);
-    @memcpy(body_buf[t_offset + 5 .. t_offset + 5 + trailer_text_len], trailer_text);
+    const idx = g_counter.fetchAdd(1, .monotonic) % g_grpc_responses.len;
+    const precomputed_frame = g_grpc_responses[idx];
 
     res.header("Content-Type", "application/grpc-web+proto");
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Expose-Headers", "grpc-status, grpc-message");
     res.header("Cache-Control", "no-cache");
-    res.body = body_buf;
-
-    std.debug.print("✅ [httpz] Sent gRPC-Web response ({d} bytes)\n", .{total_body_len});
+    res.body = precomputed_frame;
 }
 
 pub fn main() !void {
     const io = std.Io.Threaded.global_single_threaded.io();
     const allocator = std.heap.smp_allocator;
 
+    // 1. Pre-load static assets into memory
+    g_index_html = readFileFromDisk(allocator, "index.html") catch "";
+    g_bridge_js = readFileFromDisk(allocator, "bridge.js") catch "";
+    g_style_css = readFileFromDisk(allocator, "style.css") catch "";
+    g_app_wasm = readFileFromDisk(allocator, "app.wasm") catch "";
+
+    // 2. Pre-compute all 5 gRPC response frames in memory
+    inline for (NAMES, 0..) |name, i| {
+        g_grpc_responses[i] = try buildGrpcFrame(allocator, name);
+    }
+
+    // 3. Detect CPU Cores & configure maximum parallel workers
+    const cpu_count = std.Thread.getCpuCount() catch 4;
+
     var server = try httpz.Server(void).init(io, allocator, .{
         .address = .localhost(8080),
+        .workers = .{
+            .count = @intCast(@min(cpu_count, 16)),
+            .max_conn = 8192,
+        },
     }, {});
     defer server.deinit();
     defer server.stop();
@@ -151,7 +167,8 @@ pub fn main() !void {
     router.post("/hello.NameService/GetRandomName", handleGrpcGetRandomName, .{});
 
     std.debug.print("\n======================================================\n", .{});
-    std.debug.print("🚀 Zig 0.16 + httpz Production Server at http://127.0.0.1:8080\n", .{});
+    std.debug.print("🚀 Zig 0.16 + httpz High-Performance Server ({d} Workers)\n", .{cpu_count});
+    std.debug.print("🌐 In-Memory Zero-Copy Routing at http://127.0.0.1:8080\n", .{});
     std.debug.print("📡 gRPC-Web Service: /hello.NameService/GetRandomName\n", .{});
     std.debug.print("======================================================\n\n", .{});
 
