@@ -4,6 +4,13 @@
 .zig-cache/
 zig-cache/
 zig-out/
+zig-pkg/
+
+# ==========================================
+# Third-party Dependencies
+# ==========================================
+deps/
+vendor/
 
 # ==========================================
 # Compiled WASM Output

@@ -2,12 +2,20 @@
     .name = .mnemezigot,
     .version = "0.1.0",
     .fingerprint = 0x74b8ff9c1199098b,
-    .dependencies = .{},
+    .dependencies = .{
+        .httpz = .{
+            .url = "https://github.com/karlseguin/http.zig/archive/refs/heads/master.tar.gz",
+            .hash = "httpz-0.0.0-PNVzrMgTCQDhzfBLRRebTx9LU056Ph2erdN9-42rFbhj",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "frontend",
         "backend",
         "proto",
+        "README.md",
+        "GEMINI.md",
+        "AGENTS.md",
     },
 }

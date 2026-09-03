@@ -1,6 +1,6 @@
 # Workspace Instructions & Rules: Mnemezigot
 
-Project ini adalah aplikasi fullstack menggunakan **Zig 0.16 + WebAssembly (WASM) + gRPC-Web**.
+Project ini adalah aplikasi fullstack menggunakan **Zig 0.16 + WebAssembly (WASM) + gRPC-Web + httpz server**.
 Agent harus selalu mematuhi pedoman arsitektur dan gaya penulisan berikut:
 
 ---

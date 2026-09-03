@@ -43,7 +43,13 @@ pub fn build(b: *std.Build) void {
     wasm_step.dependOn(&install_wasm_dist.step);
     wasm_step.dependOn(&install_wasm_dev.step);
 
-    // 2. Build Backend Server (target: host native)
+    // 2. httpz dependency from package manager (build.zig.zon)
+    const httpz_dep = b.dependency("httpz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // 3. Build Backend Server (target: host native)
     const server = b.addExecutable(.{
         .name = "server",
         .root_module = b.createModule(.{
@@ -52,6 +58,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    server.root_module.addImport("httpz", httpz_dep.module("httpz"));
 
     // Install server binary to zig-out/server (root of output folder)
     const install_server = b.addInstallArtifact(server, .{
@@ -62,7 +69,7 @@ pub fn build(b: *std.Build) void {
     b.getInstallStep().dependOn(&install_wasm_dist.step);
     b.getInstallStep().dependOn(&install_wasm_dev.step);
 
-    // 3. Run Server step (`zig build run`)
+    // 4. Run Server step (`zig build run`)
     const run_cmd = b.addRunArtifact(server);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
