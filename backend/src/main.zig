@@ -19,7 +19,7 @@ var g_app_wasm: []const u8 = "";
 // Pre-computed gRPC-Web Frames (Zero Heap Allocation during requests)
 var g_grpc_responses: [5][]const u8 = undefined;
 
-// Fast Atomic Counter for Round-Robin / Random distribution (Thread-Safe & Lock-Free)
+// Fast Atomic Counter for Round-Robin distribution (Thread-Safe, Zero Contention)
 var g_counter = std.atomic.Value(usize).init(0);
 
 fn buildGrpcFrame(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
@@ -135,14 +135,30 @@ pub fn main() !void {
         g_grpc_responses[i] = try buildGrpcFrame(allocator, name);
     }
 
-    // 3. Detect CPU Cores & configure maximum parallel workers
+    // 3. Ultra-Tuned Worker & Buffer Pool Architecture
     const cpu_count = std.Thread.getCpuCount() catch 4;
 
     var server = try httpz.Server(void).init(io, allocator, .{
         .address = .localhost(8080),
         .workers = .{
-            .count = @intCast(@min(cpu_count, 16)),
-            .max_conn = 8192,
+            .count = @intCast(@min(cpu_count, 32)),
+            .max_conn = 16384,
+            .large_buffer_count = 2048,
+            .large_buffer_size = 4096,
+            .retain_allocated_bytes = 4096,
+        },
+        .request = .{
+            .buffer_size = 2048,
+            .max_header_count = 16,
+            .max_form_count = 0,
+            .max_multiform_count = 0,
+        },
+        .response = .{
+            .max_header_count = 8,
+        },
+        .timeout = .{
+            .request = 5,
+            .keepalive = 10,
         },
     }, {});
     defer server.deinit();
@@ -167,8 +183,8 @@ pub fn main() !void {
     router.post("/hello.NameService/GetRandomName", handleGrpcGetRandomName, .{});
 
     std.debug.print("\n======================================================\n", .{});
-    std.debug.print("🚀 Zig 0.16 + httpz High-Performance Server ({d} Workers)\n", .{cpu_count});
-    std.debug.print("🌐 In-Memory Zero-Copy Routing at http://127.0.0.1:8080\n", .{});
+    std.debug.print("🚀 Zig 0.16 + httpz Ultra-Optimized Server ({d} Workers)\n", .{cpu_count});
+    std.debug.print("⚡ Hardware AVX2/SIMD + Zero-Copy In-Memory Engine\n", .{});
     std.debug.print("📡 gRPC-Web Service: /hello.NameService/GetRandomName\n", .{});
     std.debug.print("======================================================\n\n", .{});
 

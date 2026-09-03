@@ -1,7 +1,11 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_model = .native,
+        },
+    });
     const optimize = b.standardOptimizeOption(.{});
 
     // 1. Build Frontend WASM (target: wasm32-freestanding, optimized for small size)
@@ -49,13 +53,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // 3. Build Backend Server (target: host native)
+    // 3. Build Backend Server (target: host native with CPU features enabled)
     const server = b.addExecutable(.{
         .name = "server",
         .root_module = b.createModule(.{
             .root_source_file = b.path("backend/src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .strip = if (optimize != .Debug) true else false,
         }),
     });
     server.root_module.addImport("httpz", httpz_dep.module("httpz"));
