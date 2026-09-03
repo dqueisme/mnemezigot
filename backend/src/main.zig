@@ -316,13 +316,13 @@ pub fn main() !void {
             .retain_allocated_bytes = 4096,
         },
         .request = .{
-            .buffer_size = 2048,
-            .max_header_count = 16,
+            .buffer_size = 8192,
+            .max_header_count = 64,
             .max_form_count = 0,
             .max_multiform_count = 0,
         },
         .response = .{
-            .max_header_count = 8,
+            .max_header_count = 32,
         },
         .timeout = .{
             .request = 5,
