@@ -1,30 +1,256 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Zig 0.16 + WASM + gRPC Demo</title>
-  <link rel="stylesheet" href="/style.css" />
+  <title>Mnemezigot — Fullstack Zig 0.16 + WASM + SQLite</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="container">
-    <div class="card">
-      <div class="badge">Zig 0.16 • WebAssembly • gRPC-Web</div>
-      <h1 id="greeting">Loading WASM...</h1>
-      <p class="subtitle">Tekan tombol di bawah untuk mengambil nama acak dari Zig Backend Server via gRPC.</p>
-      
-      <button id="btn-fetch" class="primary-btn" disabled>
-        <span class="btn-icon">⚡</span>
-        <span class="btn-text">Ambil Data Acak</span>
-      </button>
+  <!-- Top Navigation Bar -->
+  <nav class="navbar">
+    <div class="nav-container">
+      <a href="#/" class="nav-brand" id="brand-logo">
+        <span class="brand-icon">⚡</span>
+        <span class="brand-text">Mnemezigot</span>
+      </a>
 
-      <div class="status-box" id="status-log">
-        <div class="status-header">Console Logs:</div>
-        <div class="status-content" id="log-entries"></div>
+      <div class="nav-links">
+        <button class="nav-link is-active" id="nav-landing-btn">Beranda</button>
+        <button class="nav-link" id="nav-admin-btn">Admin Dashboard</button>
+      </div>
+
+      <div class="nav-actions">
+        <button class="primary-btn btn--sm" id="nav-auth-btn">
+          <span class="btn-text" id="nav-auth-text">Masuk / Login</span>
+        </button>
       </div>
     </div>
-  </div>
+  </nav>
 
-  <script src="/bridge.js"></script>
+  <main class="page-wrapper">
+    <!-- VIEW 1: LANDING PAGE -->
+    <section id="view-landing" class="view-panel">
+      <!-- Hero Section -->
+      <div class="hero-section">
+        <div class="badge badge--pill">High-Performance Fullstack Zig 0.16</div>
+        <h1 class="hero-title">
+          Web Framework Modern:<br />
+          <span class="text-gradient">Zig + WASM + SQLite</span>
+        </h1>
+        <p class="hero-subtitle">
+          Aplikasi fullstack berkecepatan tinggi dengan arsitektur in-process. Menggabungkan performa native <strong>Zig 0.16</strong>, runtime <strong>WebAssembly</strong> yang ramping di browser, framing <strong>gRPC-Web</strong>, dan embedded database <strong>SQLite 3.46 (WAL Mode)</strong> tanpa server terpisah.
+        </p>
+        <div class="hero-actions">
+          <button class="primary-btn" id="hero-admin-btn">
+            <span class="btn-text">🚀 Buka Dashboard Admin</span>
+          </button>
+          <a href="#live-demo" class="primary-btn btn--secondary">
+            <span class="btn-text">⚡ Coba gRPC Live</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Live Interactive Demo Widget -->
+      <div id="live-demo" class="demo-card">
+        <div class="demo-header">
+          <span class="badge">Live WebAssembly & gRPC Demo</span>
+          <h2 class="demo-title" id="greeting">Hello World</h2>
+          <p class="demo-desc">
+            Klik tombol di bawah untuk meminta data acak dari database SQLite lokal melalui koneksi biner gRPC-Web.
+          </p>
+        </div>
+
+        <div class="demo-controls">
+          <button id="btn-fetch" class="primary-btn">
+            <span class="btn-icon">🎲</span>
+            <span class="btn-text">Ambil Data Acak dari SQLite</span>
+            <span class="btn-spinner"></span>
+          </button>
+        </div>
+
+        <div class="console-card">
+          <div class="console-header">
+            <span class="console-title">Live Execution Logs (WASM + gRPC)</span>
+            <span class="badge badge--live">LIVE</span>
+          </div>
+          <div id="log-entries" class="console-body"></div>
+        </div>
+      </div>
+
+      <!-- Feature Showcase Grid -->
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🏎️</div>
+          <h3 class="feature-title">48.000+ Req / Detik</h3>
+          <p class="feature-desc">
+            Didukung server engine <strong>httpz</strong> dengan multi-worker pool dan buffer pool berkecepatan mikrodetik.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🪶</div>
+          <h3 class="feature-title">WASM Super Ramping</h3>
+          <p class="feature-desc">
+            Binary WebAssembly hanya berukuran <strong>2.5 KB</strong>, dimuat instan tanpa framework JavaScript yang membengkak.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">📁</div>
+          <h3 class="feature-title">Embedded SQLite WAL</h3>
+          <p class="feature-desc">
+            Zero installation! Database tertanam langsung di aplikasi dengan mode <strong>Write-Ahead Logging</strong> untuk konkurensi maksimal.
+          </p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🔒</div>
+          <h3 class="feature-title">gRPC-Web Biner</h3>
+          <p class="feature-desc">
+            Komunikasi Protobuf langsung dari WebAssembly ke Zig backend dengan zero heap dynamic allocations.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: LOGIN PAGE -->
+    <section id="view-login" class="view-panel is-hidden">
+      <div class="auth-wrapper">
+        <div class="card auth-card">
+          <div class="card-header-badge">
+            <span class="badge badge--primary">Keamanan & Autentikasi</span>
+          </div>
+          <h2 class="auth-title">Masuk ke Admin Console</h2>
+          <p class="auth-desc">Silakan gunakan akun administrator demo untuk masuk:</p>
+
+          <div class="credential-box">
+            <div class="credential-item">
+              <span class="credential-label">Username:</span>
+              <strong class="credential-val">admin</strong>
+            </div>
+            <div class="credential-item">
+              <span class="credential-label">Password:</span>
+              <strong class="credential-val">admin123</strong>
+            </div>
+          </div>
+
+          <div id="login-error-box" class="alert-box alert--danger is-hidden">
+            Username atau password salah! Silakan gunakan <strong>admin / admin123</strong>.
+          </div>
+
+          <form id="login-form" class="auth-form" onsubmit="return false;">
+            <div class="form-group">
+              <label for="input-username" class="form-label">Username</label>
+              <input type="text" id="input-username" class="input-field" value="admin" required />
+            </div>
+
+            <div class="form-group">
+              <label for="input-password" class="form-label">Password</label>
+              <input type="password" id="input-password" class="input-field" value="admin123" required />
+            </div>
+
+            <button type="submit" id="btn-submit-login" class="primary-btn btn--block">
+              <span class="btn-text">Masuk ke Dashboard Admin</span>
+            </button>
+          </form>
+
+          <div class="auth-footer">
+            <button class="link-btn" id="btn-back-landing">← Kembali ke Beranda</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: ADMIN DASHBOARD -->
+    <section id="view-admin" class="view-panel is-hidden">
+      <div class="admin-wrapper">
+        <!-- Admin Topbar -->
+        <div class="admin-topbar">
+          <div>
+            <span class="badge badge--primary">Console Administrator</span>
+            <h1 class="admin-title">Dashboard Sistem & Database</h1>
+          </div>
+          <div class="admin-user-badge">
+            <span class="user-chip">👤 Admin Logged In</span>
+            <button class="primary-btn btn--secondary btn--sm" id="btn-logout">Keluar (Logout)</button>
+          </div>
+        </div>
+
+        <!-- System KPI Grid -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">Server Engine</span>
+            <span class="kpi-value">Zig 0.16 + httpz</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Storage Engine</span>
+            <span class="kpi-value" id="kpi-storage">SQLite 3.46 (WAL)</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Total Data di Database</span>
+            <span class="kpi-value kpi-value--highlight" id="kpi-count">5 Data Nama</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Status Server</span>
+            <span class="kpi-value kpi-value--success">🟢 Online (8080)</span>
+          </div>
+        </div>
+
+        <!-- Admin Actions Grid -->
+        <div class="admin-grid">
+          <!-- Add Data to SQLite Form -->
+          <div class="card">
+            <h3 class="panel-title">💾 Tambah Data ke Database SQLite</h3>
+            <p class="panel-desc">
+              Masukkan nama baru untuk disimpan langsung ke file database <code>data/app.db</code>:
+            </p>
+
+            <form id="form-add-name" class="add-form" onsubmit="return false;">
+              <div class="form-group">
+                <input type="text" id="input-new-name" class="input-field" placeholder="Ketik nama baru (misal: Fajar, Gita)..." required />
+              </div>
+              <button type="submit" id="btn-add-name" class="primary-btn">
+                <span class="btn-text">Simpan ke SQLite</span>
+                <span class="btn-spinner"></span>
+              </button>
+            </form>
+
+            <div id="add-success-alert" class="alert-box alert--success is-hidden">
+              Data berhasil disimpan ke SQLite!
+            </div>
+          </div>
+
+          <!-- Live DB Query Tester -->
+          <div class="card">
+            <h3 class="panel-title">🎲 Uji Query Database SQLite</h3>
+            <p class="panel-desc">
+              Uji prepared query acak dari database SQLite yang tersimpan:
+            </p>
+
+            <div class="admin-test-result">
+              <span class="result-label">Hasil Query Terakhir:</span>
+              <div class="result-value" id="admin-test-name">Andi</div>
+            </div>
+
+            <button id="btn-admin-query" class="primary-btn btn--secondary btn--block">
+              <span>⚡ Eksekusi Query Acak SQLite</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Console Log Panel in Admin -->
+        <div class="console-card">
+          <div class="console-header">
+            <span class="console-title">Log Transaksi Database & Server</span>
+            <span class="badge badge--live">LIVE</span>
+          </div>
+          <div id="admin-log-entries" class="console-body"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="bridge.js"></script>
 </body>
 </html>

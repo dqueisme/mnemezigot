@@ -77,7 +77,7 @@ fn readFileFromDisk(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
     return error.FileNotFound;
 }
 
-// Handlers (All pure in-memory zero-copy responses)
+// Handlers for HTML & SPA Views
 fn handleIndex(_: *httpz.Request, res: *httpz.Response) !void {
     res.header("Content-Type", "text/html; charset=utf-8");
     res.header("Access-Control-Allow-Origin", "*");
@@ -114,6 +114,44 @@ fn handleGrpcGetRandomName(_: *httpz.Request, res: *httpz.Response) !void {
     res.header("Access-Control-Expose-Headers", "grpc-status, grpc-message");
     res.header("Cache-Control", "no-cache");
     res.body = frame;
+}
+
+fn handleAddName(req: *httpz.Request, res: *httpz.Response) !void {
+    const body = req.body() orelse "";
+    var name_to_add: []const u8 = "New User";
+
+    // Parse simple JSON {"name": "..."}
+    if (std.mem.indexOf(u8, body, "\"name\"")) |_| {
+        if (std.mem.indexOf(u8, body, ":")) |colon_pos| {
+            var val_slice = std.mem.trim(u8, body[colon_pos + 1 ..], " \t\r\n{}");
+            if (val_slice.len >= 2 and val_slice[0] == '"' and val_slice[val_slice.len - 1] == '"') {
+                val_slice = val_slice[1 .. val_slice.len - 1];
+            }
+            if (val_slice.len > 0) {
+                name_to_add = val_slice;
+            }
+        }
+    }
+
+    const new_count = g_db.addName(name_to_add) catch g_db.total_names;
+
+    res.header("Content-Type", "application/json");
+    res.header("Access-Control-Allow-Origin", "*");
+    var out_buf: [256]u8 = undefined;
+    const json_resp = std.fmt.bufPrint(&out_buf, "{{\"success\":true,\"name\":\"{s}\",\"total\":{d}}}", .{ name_to_add, new_count }) catch "{\"success\":true}";
+    res.body = try res.arena.dupe(u8, json_resp);
+}
+
+fn handleGetStats(_: *httpz.Request, res: *httpz.Response) !void {
+    res.header("Content-Type", "application/json");
+    res.header("Access-Control-Allow-Origin", "*");
+    var out_buf: [256]u8 = undefined;
+    const json_resp = std.fmt.bufPrint(
+        &out_buf,
+        "{{\"total_names\":{d},\"database_file\":\"data/app.db\",\"journal_mode\":\"WAL\",\"server_engine\":\"Zig 0.16 + httpz\",\"total_queries\":{d}}}",
+        .{ g_db.total_names, g_query_counter.load(.monotonic) },
+    ) catch "{}";
+    res.body = try res.arena.dupe(u8, json_resp);
 }
 
 pub fn main() !void {
@@ -161,26 +199,34 @@ pub fn main() !void {
 
     var router = try server.router(.{});
 
-    // Static Assets
+    // Static Assets & Web Routes (Serving SPA index.html for /, /login, /admin)
     router.get("/", handleIndex, .{});
+    router.get("/login", handleIndex, .{});
+    router.get("/admin", handleIndex, .{});
     router.get("/index.html", handleIndex, .{});
     router.get("/bridge.js", handleBridgeJs, .{});
     router.get("/style.css", handleStyleCss, .{});
     router.get("/app.wasm", handleAppWasm, .{});
 
     router.head("/", handleIndex, .{});
+    router.head("/login", handleIndex, .{});
+    router.head("/admin", handleIndex, .{});
     router.head("/index.html", handleIndex, .{});
     router.head("/bridge.js", handleBridgeJs, .{});
     router.head("/style.css", handleStyleCss, .{});
     router.head("/app.wasm", handleAppWasm, .{});
 
-    // gRPC-Web Service RPC route (backed by SQLite)
+    // RPC & API Endpoints
     router.post("/hello.NameService/GetRandomName", handleGrpcGetRandomName, .{});
+    router.post("/api/names", handleAddName, .{});
+    router.get("/api/stats", handleGetStats, .{});
 
     std.debug.print("\n======================================================\n", .{});
     std.debug.print("🚀 Zig 0.16 + httpz + Embedded SQLite 3.46 (Production)\n", .{});
     std.debug.print("📊 Database: data/app.db (WAL Mode Active)\n", .{});
-    std.debug.print("🌐 Server listening at: http://127.0.0.1:8080\n", .{});
+    std.debug.print("🌐 Landing Page:    http://127.0.0.1:8080/\n", .{});
+    std.debug.print("🔐 Login Page:      http://127.0.0.1:8080/login\n", .{});
+    std.debug.print("⚙️ Admin Dashboard: http://127.0.0.1:8080/admin\n", .{});
     std.debug.print("📡 gRPC-Web Endpoint: /hello.NameService/GetRandomName\n", .{});
     std.debug.print("======================================================\n\n", .{});
 

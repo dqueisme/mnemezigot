@@ -55,14 +55,7 @@ pub const Database = struct {
         // Seed initial default names if table is empty
         _ = c.sqlite3_exec(self.db, "INSERT OR IGNORE INTO names (name) VALUES ('Andi'), ('Budi'), ('Citra'), ('Dewi'), ('Eko');", null, null, null);
 
-        // Count total names
-        var count_stmt: ?*c.sqlite3_stmt = null;
-        if (c.sqlite3_prepare_v2(self.db, "SELECT COUNT(*) FROM names;", -1, &count_stmt, null) == c.SQLITE_OK) {
-            if (c.sqlite3_step(count_stmt) == c.SQLITE_ROW) {
-                self.total_names = c.sqlite3_column_int64(count_stmt, 0);
-            }
-            _ = c.sqlite3_finalize(count_stmt);
-        }
+        self.refreshCount();
 
         // Prepare query statement
         const query_sql = "SELECT name FROM names WHERE id = ? LIMIT 1;";
@@ -77,6 +70,37 @@ pub const Database = struct {
         self.prng = std.Random.DefaultPrng.init(@truncate(seed));
 
         std.debug.print("📦 [SQLite WAL] Initialized successfully ({d} names stored in {s})\n", .{ self.total_names, db_path });
+    }
+
+    pub fn refreshCount(self: *Database) void {
+        var count_stmt: ?*c.sqlite3_stmt = null;
+        if (c.sqlite3_prepare_v2(self.db, "SELECT COUNT(*) FROM names;", -1, &count_stmt, null) == c.SQLITE_OK) {
+            if (c.sqlite3_step(count_stmt) == c.SQLITE_ROW) {
+                self.total_names = c.sqlite3_column_int64(count_stmt, 0);
+            }
+            _ = c.sqlite3_finalize(count_stmt);
+        }
+    }
+
+    pub fn addName(self: *Database, name: []const u8) !i64 {
+        self.acquireLock();
+        defer self.releaseLock();
+
+        var stmt: ?*c.sqlite3_stmt = null;
+        const sql = "INSERT OR IGNORE INTO names (name) VALUES (?);";
+        if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) {
+            return error.PrepareFailed;
+        }
+        defer _ = c.sqlite3_finalize(stmt);
+
+        _ = c.sqlite3_bind_text(stmt, 1, name.ptr, @intCast(name.len), c.SQLITE_STATIC);
+
+        if (c.sqlite3_step(stmt) != c.SQLITE_DONE) {
+            return error.StepFailed;
+        }
+
+        self.refreshCount();
+        return self.total_names;
     }
 
     pub fn getRandomName(self: *Database) []const u8 {
