@@ -61,9 +61,23 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .strip = if (optimize != .Debug) true else false,
+            .link_libc = true,
         }),
     });
     server.root_module.addImport("httpz", httpz_dep.module("httpz"));
+
+    // Embedded SQLite 3 Amalgamation
+    server.root_module.addCSourceFile(.{
+        .file = b.path("c/sqlite3.c"),
+        .flags = &.{
+            "-std=c99",
+            "-DSQLITE_THREADSAFE=1",
+            "-DSQLITE_ENABLE_FTS5",
+            "-DSQLITE_ENABLE_JSON1",
+            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+        },
+    });
+    server.root_module.addIncludePath(b.path("c"));
 
     // Install server binary to zig-out/server (root of output folder)
     const install_server = b.addInstallArtifact(server, .{

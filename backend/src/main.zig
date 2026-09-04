@@ -1,14 +1,6 @@
 const std = @import("std");
 const httpz = @import("httpz");
-
-// 5 Pre-defined names
-const NAMES = [_][]const u8{
-    "Andi",
-    "Budi",
-    "Citra",
-    "Dewi",
-    "Eko",
-};
+const db_mod = @import("db.zig");
 
 // In-Memory Static Assets Cache (Zero Disk I/O during requests)
 var g_index_html: []const u8 = "";
@@ -16,11 +8,11 @@ var g_bridge_js: []const u8 = "";
 var g_style_css: []const u8 = "";
 var g_app_wasm: []const u8 = "";
 
-// Pre-computed gRPC-Web Frames (Zero Heap Allocation during requests)
-var g_grpc_responses: [5][]const u8 = undefined;
+// Embedded SQLite Database Layer
+var g_db: db_mod.Database = .{};
 
-// Fast Atomic Counter for Round-Robin distribution (Thread-Safe, Zero Contention)
-var g_counter = std.atomic.Value(usize).init(0);
+// Fast Atomic Counter for tracking total query counts
+var g_query_counter = std.atomic.Value(usize).init(0);
 
 fn buildGrpcFrame(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     const proto_len: u32 = @intCast(2 + name.len);
@@ -40,7 +32,8 @@ fn buildGrpcFrame(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     buf[3] = @intCast((proto_len >> 8) & 0xFF);
     buf[4] = @intCast(proto_len & 0xFF);
 
-    // Protobuf payload
+    // Protobuf payload: message RandomNameResponse { string name = 1; }
+    // Field 1, wire type 2: tag = (1 << 3) | 2 = 0x0A
     buf[5] = 0x0A;
     buf[6] = @intCast(name.len);
     @memcpy(buf[7 .. 7 + name.len], name);
@@ -110,30 +103,32 @@ fn handleAppWasm(_: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn handleGrpcGetRandomName(_: *httpz.Request, res: *httpz.Response) !void {
-    const idx = g_counter.fetchAdd(1, .monotonic) % g_grpc_responses.len;
-    const precomputed_frame = g_grpc_responses[idx];
+    _ = g_query_counter.fetchAdd(1, .monotonic);
+
+    // Dynamic query from embedded SQLite database
+    const name = g_db.getRandomName();
+    const frame = try buildGrpcFrame(res.arena, name);
 
     res.header("Content-Type", "application/grpc-web+proto");
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Expose-Headers", "grpc-status, grpc-message");
     res.header("Cache-Control", "no-cache");
-    res.body = precomputed_frame;
+    res.body = frame;
 }
 
 pub fn main() !void {
     const io = std.Io.Threaded.global_single_threaded.io();
     const allocator = std.heap.smp_allocator;
 
-    // 1. Pre-load static assets into memory
+    // 1. Initialize embedded SQLite with WAL Mode
+    try g_db.init("data/app.db");
+    defer g_db.deinit();
+
+    // 2. Pre-load static assets into memory
     g_index_html = readFileFromDisk(allocator, "index.html") catch "";
     g_bridge_js = readFileFromDisk(allocator, "bridge.js") catch "";
     g_style_css = readFileFromDisk(allocator, "style.css") catch "";
     g_app_wasm = readFileFromDisk(allocator, "app.wasm") catch "";
-
-    // 2. Pre-compute all 5 gRPC response frames in memory
-    inline for (NAMES, 0..) |name, i| {
-        g_grpc_responses[i] = try buildGrpcFrame(allocator, name);
-    }
 
     // 3. Ultra-Tuned Worker & Buffer Pool Architecture
     const cpu_count = std.Thread.getCpuCount() catch 4;
@@ -141,20 +136,20 @@ pub fn main() !void {
     var server = try httpz.Server(void).init(io, allocator, .{
         .address = .localhost(8080),
         .workers = .{
-            .count = @intCast(cpu_count),
-            .max_conn = 16384,
-            .large_buffer_count = 2048,
+            .count = @intCast(@min(cpu_count, 16)),
+            .max_conn = 8192,
+            .large_buffer_count = 1024,
             .large_buffer_size = 4096,
             .retain_allocated_bytes = 4096,
         },
         .request = .{
-            .buffer_size = 2048,
-            .max_header_count = 16,
+            .buffer_size = 8192, // 8 KB header buffer (supports all desktop browsers)
+            .max_header_count = 64,
             .max_form_count = 0,
             .max_multiform_count = 0,
         },
         .response = .{
-            .max_header_count = 8,
+            .max_header_count = 32,
         },
         .timeout = .{
             .request = 5,
@@ -166,7 +161,7 @@ pub fn main() !void {
 
     var router = try server.router(.{});
 
-    // Static Assets (GET & HEAD)
+    // Static Assets
     router.get("/", handleIndex, .{});
     router.get("/index.html", handleIndex, .{});
     router.get("/bridge.js", handleBridgeJs, .{});
@@ -179,13 +174,14 @@ pub fn main() !void {
     router.head("/style.css", handleStyleCss, .{});
     router.head("/app.wasm", handleAppWasm, .{});
 
-    // gRPC-Web RPC Route
+    // gRPC-Web Service RPC route (backed by SQLite)
     router.post("/hello.NameService/GetRandomName", handleGrpcGetRandomName, .{});
 
     std.debug.print("\n======================================================\n", .{});
-    std.debug.print("🚀 Zig 0.16 + httpz Ultra-Optimized Server ({d} Workers)\n", .{cpu_count});
-    std.debug.print("⚡ Hardware AVX2/SIMD + Zero-Copy In-Memory Engine\n", .{});
-    std.debug.print("📡 gRPC-Web Service: /hello.NameService/GetRandomName\n", .{});
+    std.debug.print("🚀 Zig 0.16 + httpz + Embedded SQLite 3.46 (Production)\n", .{});
+    std.debug.print("📊 Database: data/app.db (WAL Mode Active)\n", .{});
+    std.debug.print("🌐 Server listening at: http://127.0.0.1:8080\n", .{});
+    std.debug.print("📡 gRPC-Web Endpoint: /hello.NameService/GetRandomName\n", .{});
     std.debug.print("======================================================\n\n", .{});
 
     try server.listen();
