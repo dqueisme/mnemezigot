@@ -53,7 +53,27 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // 3. Build Backend Server (target: host native with CPU features enabled)
+    // 3. Expose Mnemezigot Framework Module for other packages
+    const mnemezigot_mod = b.addModule("mnemezigot", .{
+        .root_source_file = b.path("src/mnemezigot.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mnemezigot_mod.addImport("httpz", httpz_dep.module("httpz"));
+    mnemezigot_mod.addCSourceFile(.{
+        .file = b.path("c/sqlite3.c"),
+        .flags = &.{
+            "-std=c99",
+            "-DSQLITE_THREADSAFE=1",
+            "-DSQLITE_ENABLE_FTS5",
+            "-DSQLITE_ENABLE_JSON1",
+            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+        },
+    });
+    mnemezigot_mod.addIncludePath(b.path("c"));
+
+    // 4. Build Backend Server (target: host native with CPU features enabled)
     const server = b.addExecutable(.{
         .name = "server",
         .root_module = b.createModule(.{
