@@ -7,13 +7,14 @@ zig-out/
 zig-pkg/
 
 # ==========================================
-# Third-party Dependencies & Worktrees
+# Third-party Dependencies & Worktrees & Starter
 # ==========================================
 deps/
 vendor/
 c/
 worktrees/
 .worktrees/
+starter/
 
 # ==========================================
 # Database Files
