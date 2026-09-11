@@ -55,7 +55,7 @@ pub const App = struct {
             },
         }, {});
 
-        var app = App{
+        const app = App{
             .db = db,
             .server = server,
             .config = config,

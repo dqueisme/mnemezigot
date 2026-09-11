@@ -50,12 +50,7 @@ pub const Context = struct {
 
     /// Serialize any Zig struct, slice, or value to JSON and return with application/json
     pub fn json(self: *Context, data: anytype) !void {
-        var string_list: std.ArrayList(u8) = .empty;
-        defer string_list.deinit(self.arena);
-
-        try std.json.stringify(data, .{}, string_list.writer(self.arena));
-
-        const body_bytes = try self.res.arena.dupe(u8, string_list.items);
+        const body_bytes = try std.fmt.allocPrint(self.res.arena, "{f}", .{std.json.fmt(data, .{})});
         self.res.header("Content-Type", "application/json");
         self.res.header("Access-Control-Allow-Origin", "*");
         self.res.body = body_bytes;
