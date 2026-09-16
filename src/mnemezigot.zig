@@ -12,6 +12,7 @@ pub const db = @import("db.zig");
 pub const Database = db.Database;
 
 pub const grpc = @import("grpc.zig");
+pub const client = @import("client.zig");
 
 test {
     std.testing.refAllDecls(@This());

@@ -27,8 +27,8 @@ data/
 # ==========================================
 # Compiled WASM Output
 # ==========================================
-frontend/static/app.wasm
-frontend/static/*.wasm.map
+*.wasm
+*.wasm.map
 
 # ==========================================
 # Operating System Files

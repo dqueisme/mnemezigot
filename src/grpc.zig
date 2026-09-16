@@ -66,3 +66,21 @@ pub fn writeDoubleField(buf: []u8, offset: *usize, field_num: u32, val: f64) voi
     std.mem.writeInt(u64, buf[offset.*..][0..8], bits, .little);
     offset.* += 8;
 }
+
+test "wrapFrame and decode" {
+    const allocator = std.testing.allocator;
+    const payload = "hello protobuf";
+    const frame = try wrapFrame(allocator, payload);
+    defer allocator.free(frame);
+
+    try std.testing.expect(frame.len >= 5 + payload.len);
+    try std.testing.expectEqual(@as(u8, 0x00), frame[0]);
+}
+
+test "writeStringField and writeIntField" {
+    var buf: [64]u8 = undefined;
+    var offset: usize = 0;
+    writeStringField(&buf, &offset, 1, "test");
+    writeIntField(&buf, &offset, 2, 42);
+    try std.testing.expect(offset > 0);
+}

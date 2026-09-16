@@ -1,128 +1,146 @@
-# Zig 0.16 + WebAssembly (WASM) + gRPC Demo (Powered by `httpz`)
+# Mnemezigot Framework
 
-High-Performance Fullstack Web Application menggunakan **Zig 0.16**:
-- **Frontend**: Dikompilasi ke WebAssembly (`wasm32-freestanding`, ReleaseSmall: 2.5 KB), berinteraksi dengan browser DOM via JS bridge (`bridge.js`).
-- **Backend Server**: High-concurrency native server ditenagai oleh **`httpz`** (Pure Zig event-driven engine dengan multi-worker support) yang mampu melayani ratusan ribu request per detik.
-- **Komunikasi**: Standard **gRPC-Web** framing over HTTP POST (`application/grpc-web+proto`).
+**Mnemezigot** adalah fullstack web framework modern dan ultra-cepat untuk **Zig 0.16** yang dirancang sebagai package reusable. Framework ini menggabungkan server berperforma tinggi, database embedded SQLite dengan mode WAL otomatis, dan dukungan penuh untuk WebAssembly (WASM) serta gRPC-Web.
 
 ---
 
-## 🏗️ Struktur Project
+## 🌟 Karakteristik Utama
 
+1. **Zero-Config SQLite (HANYA WAL Mode)**:
+   - Database otomatis diinisialisasi dengan `PRAGMA journal_mode = WAL;`, `busy_timeout = 5000;`, dan `synchronous = NORMAL;`.
+   - Menggunakan embedded SQLite 3.46 C amalgamation dengan thread-safety aktif (`SQLITE_THREADSAFE=1`).
+   - Bebas konfigurasi rumit, langsung siap pakai via `ctx.db`.
+
+2. **Hanya 3 Bentuk Keluaran**:
+   - **Keluaran 1: Web UI (HTML, CSS & WASM)**: Logika frontend dikompilasi langsung dari Zig ke WebAssembly (`app.wasm` < 10 KB) tanpa overhead framework JS berat.
+   - **Keluaran 2: REST API (JSON)**: Serialisasi dan deserialisasi JSON berkecepatan tinggi via `ctx.json(data)` dan `ctx.bindJson(T)`.
+   - **Keluaran 3: gRPC (gRPC-Web / Protobuf)**: Komunikasi biner performa tinggi langsung dari browser dengan framing standar HTTP via `ctx.grpcResponse(proto)`.
+
+3. **Single File Entry Point**:
+   - Struktur kode sederhana dan ringkas terinspirasi kemudahan web framework modern, di mana backend logic, migrasi database, dan routing terpusat dalam satu file entrypoint.
+
+4. **WASM Client SDK Terintegrasi**:
+   - Menyediakan modul `mnemezigot_client` untuk mempermudah komunikasi WASM <-> browser bridge (DOM text update, memory management `alloc`/`free`, dan decode frame gRPC-Web biner).
+
+---
+
+## 📦 Menggunakan Mnemezigot sebagai Package
+
+Tambahkan `mnemezigot` ke `build.zig.zon` pada proyek Anda:
+
+```zig
+.{
+    .name = .my_app,
+    .version = "0.1.0",
+    .fingerprint = 0x...,
+    .dependencies = .{
+        .mnemezigot = .{
+            .url = "https://github.com/dqueisme/mnemezigot/archive/refs/heads/master.tar.gz",
+            .hash = "...", // atau .path = "../mnemezigot" untuk pengembangan lokal
+        },
+    },
+    .paths = .{ "" },
+}
 ```
+
+Pada `build.zig` aplikasi Anda:
+
+```zig
+const mn_dep = b.dependency("mnemezigot", .{
+    .target = target,
+    .optimize = optimize,
+});
+
+// Import backend server module
+server.root_module.addImport("mnemezigot", mn_dep.module("mnemezigot"));
+
+// Import WASM client module (untuk target wasm32-freestanding)
+wasm.root_module.addImport("mnemezigot_client", mn_dep.module("mnemezigot_client"));
+```
+
+---
+
+## 🚀 Contoh Penggunaan (Single File Backend)
+
+```zig
+const std = @import("std");
+const mn = @import("mnemezigot");
+
+fn handleIndex(ctx: *mn.Context) !void {
+    try ctx.html("<h1>Halo dari Mnemezigot Framework!</h1>");
+}
+
+fn handleGetStats(ctx: *mn.Context) !void {
+    const total = try ctx.db.queryScalarInt("SELECT COUNT(*) FROM users;");
+    try ctx.json(.{
+        .status = "ok",
+        .total_users = total,
+        .engine = "SQLite WAL",
+    });
+}
+
+pub fn main() !void {
+    const allocator = std.heap.smp_allocator;
+
+    var app = try mn.App.init(allocator, .{
+        .port = 8080,
+        .db_path = "data/app.db", // Otomatis WAL mode aktif
+    });
+    defer app.deinit();
+
+    // 1. Skema SQLite
+    try app.db.exec("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT);");
+
+    // 2. Registrasi Routing
+    try app.get("/", handleIndex);
+    try app.get("/api/stats", handleGetStats);
+
+    // 3. Jalankan Server
+    try app.listen();
+}
+```
+
+---
+
+## 📁 Struktur Repositori Framework
+
+```text
 mnemezigot/
-├── build.zig               # Multi-target build script (WASM + httpz Server)
-├── build.zig.zon           # Package manifest & dependencies (httpz via package manager)
-├── proto/
-│   └── service.proto       # Protobuf & RPC service definition
-├── frontend/
-│   ├── STYLEGUIDE.md       # Panduan styling & konvensi CSS (Do & Don't)
-│   ├── src/
-│   │   └── main.zig        # Frontend logic di-compile ke WebAssembly (WASM)
-│   └── static/
-│       ├── index.html      # Clean semantic HTML
-│       ├── bridge.js       # JS runtime bridge untuk WebAssembly & gRPC fetch
-│       ├── style.css       # UI Styling terpusat (CSS variables & semantic classes)
-│       └── app.wasm        # Output kompilasi WASM (ReleaseSmall: 2.5 KB)
-└── backend/
-    └── src/
-        ├── db.zig          # Embedded SQLite 3.46 WAL Mode Database Layer
-        └── main.zig        # Production-grade httpz backend server (Static files + gRPC-Web dispatcher)
+├── build.zig               # Export modules: "mnemezigot" & "mnemezigot_client"
+├── build.zig.zon           # Package manifest
+├── c/                      # SQLite 3.46 C Amalgamation
+│   ├── sqlite3.c
+│   ├── sqlite3.h
+│   └── sqlite3ext.h
+├── src/                    # Source code Framework Core
+│   ├── mnemezigot.zig      # Entrypoint package library
+│   ├── app.zig             # Server Engine (httpz wrapper & routing)
+│   ├── context.zig         # Context (HTML, CSS, WASM, JSON, gRPC responses)
+│   ├── db.zig              # Zero-Config SQLite WAL Engine
+│   ├── grpc.zig            # gRPC-Web framing & Protobuf encoding
+│   └── client.zig          # WASM Frontend Client SDK
+├── starter/                # Template Starter Project Resmi (mnemezigot-starter)
+├── examples/               # Contoh Implementasi Aplikasi Lengkap
+│   └── admin-dashboard/    # Full app: Landing page, auth, dan admin dashboard
+└── frontend/
+    └── STYLEGUIDE.md       # Panduan styling UI (CSS variables, semantic classes)
 ```
 
 ---
 
-## ⚡ Alur Kerja Sistem (Data Flow)
+## 🎯 Starter Template
 
-1. **Inisialisasi**:
-   - Browser memuat `index.html` dan `bridge.js`.
-   - `bridge.js` melakukan streaming instantiate `app.wasm`.
-   - WASM mengeksekusi `init()` dan mengubah DOM menjadi `Hello World`.
-
-2. **Tombol "Ambil Data Acak" Ditekan**:
-   - Browser event memicu fungsi `on_button_click()` di dalam WASM.
-   - WASM menyiapkan 5-byte header frame gRPC kosong untuk `RandomNameRequest` dan meminta JS bridge mengirim request ke `/hello.NameService/GetRandomName`.
-   - JS bridge mengirim `fetch` request dengan header `Content-Type: application/grpc-web+proto`.
-
-3. **Server Memproses Request via `httpz` & SQLite**:
-   - `httpz` router menerima request secara asinkron (non-blocking).
-   - Server Zig mengeksekusi query acak ke embedded **SQLite** (`data/app.db`) via prepared statement berkecepatan mikrodetik (WAL mode).
-   - Server meng-encode Protobuf payload `RandomNameResponse { name = "<nama>" }`.
-   - Server membungkus payload dengan framing gRPC data frame (flag `0x00`) + trailer frame status (flag `0x80`, `grpc-status: 0`).
-   - Server mengirim response HTTP 200 berkecepatan sub-milidetik (~48.000 req/detik).
-
-4. **WASM Menerima & Render**:
-   - JS bridge menyalin byte response ke memory WASM dan memanggil `on_grpc_response()`.
-   - WASM mem-parsing frame gRPC & protobuf string name.
-   - WASM memformat pesan menjadi `Hello <Nama>` dan memanggil `js_update_text()` untuk mengupdate teks di DOM.
+Untuk langsung memulai proyek baru berbasis Mnemezigot tanpa menulis boilerplate, gunakan template resmi di folder [`starter/`](starter/):
+- Sudah terkonfigurasi dengan backend server Zig.
+- Frontend WebAssembly (`app.wasm` < 3 KB) dengan browser bridge JS.
+- Styling semantic CSS patuh pada [`frontend/STYLEGUIDE.md`](frontend/STYLEGUIDE.md).
+- Menjalankan 3 bentuk keluaran secara live.
 
 ---
 
-## 🚀 Fitur & Keunggulan Backend `httpz`
+## 🧪 Pengujian Unit Framework
 
-- **100% Pure Zig**: Zero C dependencies, kompilasi super cepat, dan cross-platform (Linux & Windows).
-- **High Concurrency**: Mampu melayani ratusan ribu request per detik (*throughput ~150k+ req/s*).
-- **Memory Footprint Sangat Irit**: Hanya membutuhkan ~5 MB RAM idle dan < 25 MB pada beban penuh.
-- **Cross-Compilation**: Dapat langsung di-compile untuk Windows (`server.exe`) maupun Linux (`server`).
-
----
-
-## 🎨 Panduan Styling & CSS (Do & Don't)
-
-Project ini menggunakan pendekatan **Semantic Component-Based CSS** (mirip Bootstrap/BEM) untuk menjaga file HTML tetap bersih, rapi, dan mudah dibaca tanpa pencemaran *utility-class soup*.
-
-### ✅ DO (Harus Dilakukan)
-1. **Gunakan Semantic Class Names**: Beri nama class berdasarkan fungsi komponen (`.card`, `.primary-btn`, `.badge`, `.status-box`).
-2. **Pusatkan Warna di CSS Variables (`:root`)**: Selalu gunakan `var(--primary)`, `var(--card-bg)`, `var(--border)` untuk mempermudah retheming.
-3. **Gunakan Modifier Class untuk State / Varian**: Contoh `.primary-btn.btn--secondary`, `.is-loading`, `.is-active`.
-4. **Jaga HTML Tetap Minimalis**: HTML hanya berisi struktur konten dan semantic class hooks yang stabil.
-5. **Manipulasi State via Class / Atribut**: WASM / JS cukup me-toggle class (misal `classList.toggle('is-loading')`) atau atribut `disabled`.
-
-### ❌ DON'T (Harus Dihindari)
-1. **DILARANG Utility-Class Soup di HTML**: Hindari menumpuk 10+ utility class (seperti gaya Tailwind) di satu elemen HTML.
-2. **DILARANG Inline Styles**: Hindari atribut `style="..."` di elemen HTML.
-3. **DILARANG Hardcode Hex Warna Berulang**: Jangan menulis `#f97316` berulang kali; gunakan `var(--primary)`.
-4. **DILARANG Injeksi CSS String dari WASM**: Jangan kirim string CSS inline dari WebAssembly ke JS.
-5. **DILARANG Penggunaan `!important`**: Rancang selector class tunggal yang bersih.
-
-> 📖 Panduan lengkap dan contoh komponen dapat dilihat di **[`frontend/STYLEGUIDE.md`](file:///home/aripseprudin/workspace/mnemezigot/frontend/STYLEGUIDE.md)**.
-
----
-
-## 🚀 Cara Build & Menjalankan
-
-### 1. Build Proyek
+Untuk menjalankan seluruh unit test framework:
 ```bash
-zig build
+zig build test
 ```
-Hasil build akan terkumpul secara otomatis di folder **`zig-out/`**:
-```
-zig-out/
-├── server                  # Binary executable backend (ditenagai httpz)
-└── public/                 # Folder aset statis frontend
-    ├── app.wasm            # Binary WebAssembly (2.5 KB)
-    ├── bridge.js           # JS runtime bridge
-    ├── index.html          # Web UI
-    └── style.css           # Styling
-```
-
-### 2. Jalankan Server
-```bash
-zig build run
-```
-Atau jalankan langsung binary di folder `zig-out/`:
-```bash
-cd zig-out && ./server
-```
-
-Buka browser di: **[http://localhost:8080](http://localhost:8080)**
-
----
-
-## 📦 Distribusi ke User (Packaging)
-
-Untuk mengirimkan aplikasi ke user akhir dalam bentuk ZIP:
-```bash
-cd zig-out && zip -r ../aplikasi.zip * && cd ..
-```
-User cukup mengekstrak `aplikasi.zip` dan menjalankan `./server`.
