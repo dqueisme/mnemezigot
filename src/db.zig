@@ -120,6 +120,15 @@ pub const Database = struct {
         return 0;
     }
 
+    /// Model Query Builder (Struct-First)
+    pub fn from(self: *Database, comptime T: type) @import("model.zig").ModelQuery(T) {
+        return @import("model.zig").ModelQuery(T).init(self);
+    }
+
+    pub fn model(self: *Database, comptime T: type) @import("model.zig").ModelQuery(T) {
+        return self.from(T);
+    }
+
     pub fn deinit(self: *Database) void {
         if (self.handle) |h| {
             _ = c.sqlite3_close(h);

@@ -13,6 +13,8 @@ pub const Database = db.Database;
 
 pub const grpc = @import("grpc.zig");
 pub const client = @import("client.zig");
+pub const model = @import("model.zig");
+pub const ModelQuery = model.ModelQuery;
 
 test {
     std.testing.refAllDecls(@This());
