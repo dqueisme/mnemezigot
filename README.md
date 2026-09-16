@@ -122,8 +122,7 @@ mnemezigot/
 ├── starter/                # Template Starter Project Resmi (mnemezigot-starter)
 ├── examples/               # Contoh Implementasi Aplikasi Lengkap
 │   └── admin-dashboard/    # Full app: Landing page, auth, dan admin dashboard
-└── frontend/
-    └── STYLEGUIDE.md       # Panduan styling UI (CSS variables, semantic classes)
+└── STYLEGUIDE.md           # Panduan styling UI (CSS variables, semantic classes)
 ```
 
 ---
@@ -133,7 +132,7 @@ mnemezigot/
 Untuk langsung memulai proyek baru berbasis Mnemezigot tanpa menulis boilerplate, gunakan template resmi di folder [`starter/`](starter/):
 - Sudah terkonfigurasi dengan backend server Zig.
 - Frontend WebAssembly (`app.wasm` < 3 KB) dengan browser bridge JS.
-- Styling semantic CSS patuh pada [`frontend/STYLEGUIDE.md`](frontend/STYLEGUIDE.md).
+- Styling semantic CSS patuh pada [`STYLEGUIDE.md`](STYLEGUIDE.md).
 - Menjalankan 3 bentuk keluaran secara live.
 
 ---

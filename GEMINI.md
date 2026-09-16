@@ -8,7 +8,7 @@ Agent harus selalu mematuhi pedoman arsitektur dan gaya penulisan berikut:
 ## 📖 Project Context & Documentation (MANDATORY)
 
 1. **Wajib Membaca `README.md`**: Sebelum memulai implementasi fitur, refactoring, atau perubahan kode, Agent **WAJIB** membaca [`README.md`](file:///home/aripseprudin/workspace/mnemezigot/README.md) untuk memahami arsitektur sistem, aliran data (data flow), dan struktur folder proyek terkini.
-2. **Wajib Membaca `frontend/STYLEGUIDE.md`**: Saat mengerjakan atau memodifikasi komponen UI/frontend, Agent **WAJIB** merujuk pada [`frontend/STYLEGUIDE.md`](file:///home/aripseprudin/workspace/mnemezigot/frontend/STYLEGUIDE.md).
+2. **Wajib Membaca `STYLEGUIDE.md`**: Saat mengerjakan atau memodifikasi komponen UI/frontend, Agent **WAJIB** merujuk pada [`STYLEGUIDE.md`](file:///home/aripseprudin/workspace/mnemezigot/STYLEGUIDE.md).
 
 ---
 
