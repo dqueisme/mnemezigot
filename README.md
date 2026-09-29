@@ -137,6 +137,12 @@ Untuk langsung memulai proyek baru berbasis Mnemezigot tanpa menulis boilerplate
 
 ---
 
+## 🗺️ Feature Roadmap
+
+Untuk melihat daftar lengkap rekomendasi dan rencana pengembangan fitur Mnemezigot Framework ke depannya, silakan pelajari dokumen [`ROADMAP.md`](ROADMAP.md).
+
+---
+
 ## 🧪 Pengujian Unit Framework
 
 Untuk menjalankan seluruh unit test framework:
