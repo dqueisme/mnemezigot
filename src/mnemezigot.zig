@@ -15,6 +15,7 @@ pub const getMimeType = context.getMimeType;
 
 pub const db = @import("db.zig");
 pub const Database = db.Database;
+pub const Migration = db.Migration;
 
 pub const grpc = @import("grpc.zig");
 pub const client = @import("client.zig");

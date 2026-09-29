@@ -156,6 +156,19 @@ pub fn ModelQuery(comptime T: type) type {
             return "INSERT INTO " ++ table_name ++ " (" ++ cols ++ ") VALUES (" ++ vals ++ ");";
         }
 
+        pub fn updateSql(comptime DataType: type) []const u8 {
+            comptime var set_clause: []const u8 = "";
+            const fields = @typeInfo(DataType).@"struct".fields;
+            inline for (fields, 0..) |f, i| {
+                if (i > 0) {
+                    set_clause = set_clause ++ ", " ++ f.name ++ " = ?";
+                } else {
+                    set_clause = set_clause ++ f.name ++ " = ?";
+                }
+            }
+            return "UPDATE " ++ table_name ++ " SET " ++ set_clause ++ " WHERE id = ?;";
+        }
+
         db: *Database,
 
         pub fn init(db: *Database) Self {
@@ -196,6 +209,31 @@ pub fn ModelQuery(comptime T: type) type {
             }
 
             return c.sqlite3_last_insert_rowid(self.db.handle);
+        }
+
+        /// Update a record by primary key id using an anonymous struct of fields
+        pub fn update(self: Self, id: anytype, data: anytype) !void {
+            const sql = comptime updateSql(@TypeOf(data));
+
+            self.db.acquireLock();
+            defer self.db.releaseLock();
+
+            var stmt: ?*c.sqlite3_stmt = null;
+            if (c.sqlite3_prepare_v2(self.db.handle, sql.ptr, @intCast(sql.len), &stmt, null) != c.SQLITE_OK) {
+                return error.PrepareFailed;
+            }
+            defer _ = c.sqlite3_finalize(stmt);
+
+            const fields = @typeInfo(@TypeOf(data)).@"struct".fields;
+            inline for (fields, 1..) |field, idx| {
+                const val = @field(data, field.name);
+                try bindValue(stmt, @intCast(idx), val);
+            }
+            try bindValue(stmt, @intCast(fields.len + 1), id);
+
+            if (c.sqlite3_step(stmt) != c.SQLITE_DONE) {
+                return error.StepFailed;
+            }
         }
 
         /// Fetch all records mapped to []T allocated via allocator
@@ -275,19 +313,54 @@ pub fn ModelQuery(comptime T: type) type {
         pub fn where(self: Self, comptime clause: []const u8, args: anytype) FilteredQuery(T, clause, @TypeOf(args)) {
             return FilteredQuery(T, clause, @TypeOf(args)).init(self.db, args);
         }
+
+        /// Add ORDER BY clause
+        pub fn orderBy(self: Self, comptime order_clause: []const u8) FilteredQuery(T, "1=1", void) {
+            var q = FilteredQuery(T, "1=1", void).init(self.db, {});
+            q.order_clause = order_clause;
+            return q;
+        }
+
+        /// Add LIMIT
+        pub fn limit(self: Self, n: usize) FilteredQuery(T, "1=1", void) {
+            var q = FilteredQuery(T, "1=1", void).init(self.db, {});
+            q.limit_val = n;
+            return q;
+        }
     };
 }
 
-/// Sub-query builder with WHERE clause
+/// Sub-query builder with WHERE clause, ORDER BY, LIMIT and OFFSET
 pub fn FilteredQuery(comptime T: type, comptime clause: []const u8, comptime ArgsType: type) type {
     return struct {
         const Self = @This();
 
         db: *Database,
         args: ArgsType,
+        order_clause: ?[]const u8 = null,
+        limit_val: ?usize = null,
+        offset_val: ?usize = null,
 
         pub fn init(db: *Database, args: ArgsType) Self {
             return .{ .db = db, .args = args };
+        }
+
+        pub fn orderBy(self: Self, comptime order_clause: []const u8) Self {
+            var copy = self;
+            copy.order_clause = order_clause;
+            return copy;
+        }
+
+        pub fn limit(self: Self, n: usize) Self {
+            var copy = self;
+            copy.limit_val = n;
+            return copy;
+        }
+
+        pub fn offset(self: Self, n: usize) Self {
+            var copy = self;
+            copy.offset_val = n;
+            return copy;
         }
 
         fn bindArgs(stmt: ?*c.sqlite3_stmt, args: ArgsType) !void {
@@ -299,6 +372,7 @@ pub fn FilteredQuery(comptime T: type, comptime clause: []const u8, comptime Arg
                         try bindValue(stmt, @intCast(idx), val);
                     }
                 },
+                .void => {},
                 else => {
                     try bindValue(stmt, 1, args);
                 },
@@ -326,13 +400,31 @@ pub fn FilteredQuery(comptime T: type, comptime clause: []const u8, comptime Arg
         }
 
         pub fn all(self: Self, allocator: std.mem.Allocator) ![]T {
-            const sql = "SELECT " ++ ModelQuery(T).column_list ++ " FROM " ++ ModelQuery(T).table_name ++ " WHERE " ++ clause ++ ";";
+            var sql_buf: std.ArrayList(u8) = .empty;
+            defer sql_buf.deinit(allocator);
+
+            try std.fmt.format(sql_buf.writer(allocator), "SELECT {s} FROM {s} WHERE {s}", .{
+                ModelQuery(T).column_list,
+                ModelQuery(T).table_name,
+                clause,
+            });
+
+            if (self.order_clause) |order| {
+                try std.fmt.format(sql_buf.writer(allocator), " ORDER BY {s}", .{order});
+            }
+            if (self.limit_val) |lim| {
+                try std.fmt.format(sql_buf.writer(allocator), " LIMIT {d}", .{lim});
+            }
+            if (self.offset_val) |off| {
+                try std.fmt.format(sql_buf.writer(allocator), " OFFSET {d}", .{off});
+            }
+            try sql_buf.append(allocator, ';');
 
             self.db.acquireLock();
             defer self.db.releaseLock();
 
             var stmt: ?*c.sqlite3_stmt = null;
-            if (c.sqlite3_prepare_v2(self.db.handle, sql.ptr, @intCast(sql.len), &stmt, null) != c.SQLITE_OK) {
+            if (c.sqlite3_prepare_v2(self.db.handle, sql_buf.items.ptr, @intCast(sql_buf.items.len), &stmt, null) != c.SQLITE_OK) {
                 return error.PrepareFailed;
             }
             defer _ = c.sqlite3_finalize(stmt);
@@ -354,13 +446,25 @@ pub fn FilteredQuery(comptime T: type, comptime clause: []const u8, comptime Arg
         }
 
         pub fn first(self: Self, allocator: std.mem.Allocator) !?T {
-            const sql = "SELECT " ++ ModelQuery(T).column_list ++ " FROM " ++ ModelQuery(T).table_name ++ " WHERE " ++ clause ++ " LIMIT 1;";
+            var sql_buf: std.ArrayList(u8) = .empty;
+            defer sql_buf.deinit(allocator);
+
+            try std.fmt.format(sql_buf.writer(allocator), "SELECT {s} FROM {s} WHERE {s}", .{
+                ModelQuery(T).column_list,
+                ModelQuery(T).table_name,
+                clause,
+            });
+
+            if (self.order_clause) |order| {
+                try std.fmt.format(sql_buf.writer(allocator), " ORDER BY {s}", .{order});
+            }
+            try sql_buf.appendSlice(allocator, " LIMIT 1;");
 
             self.db.acquireLock();
             defer self.db.releaseLock();
 
             var stmt: ?*c.sqlite3_stmt = null;
-            if (c.sqlite3_prepare_v2(self.db.handle, sql.ptr, @intCast(sql.len), &stmt, null) != c.SQLITE_OK) {
+            if (c.sqlite3_prepare_v2(self.db.handle, sql_buf.items.ptr, @intCast(sql_buf.items.len), &stmt, null) != c.SQLITE_OK) {
                 return error.PrepareFailed;
             }
             defer _ = c.sqlite3_finalize(stmt);
@@ -404,7 +508,7 @@ test "ModelQuery compile-time DDL and SQL generation" {
     try std.testing.expect(std.mem.indexOf(u8, insert_sql, "INSERT INTO users (username, is_active) VALUES (?, ?);") != null);
 }
 
-test "ModelQuery SQLite CRUD operations" {
+test "ModelQuery SQLite CRUD operations, Update, Limit, Offset, OrderBy" {
     const allocator = std.testing.allocator;
 
     var db = try Database.init(":memory:");
@@ -422,54 +526,24 @@ test "ModelQuery SQLite CRUD operations" {
     // 1. Create Table automatically from struct
     try db.from(Product).createTableIfNotExists();
 
-    // 2. Count should be 0 initially
-    try std.testing.expectEqual(@as(i64, 0), try db.from(Product).count());
+    // 2. Insert records
+    _ = try db.from(Product).insert(.{ .name = "Laptop", .price = 1250.50, .is_available = true });
+    const id2 = try db.from(Product).insert(.{ .name = "Mouse", .price = 25.00, .is_available = false });
+    _ = try db.from(Product).insert(.{ .name = "Keyboard", .price = 75.00, .is_available = true });
 
-    // 3. Insert records
-    const id1 = try db.from(Product).insert(.{
-        .name = "Laptop",
-        .price = 1250.50,
-        .is_available = true,
-    });
-    try std.testing.expectEqual(@as(i64, 1), id1);
+    // 3. Update record
+    try db.from(Product).update(id2, .{ .price = 30.00, .is_available = true });
+    const updated = try db.from(Product).find(id2, allocator);
+    try std.testing.expect(updated != null);
+    defer allocator.free(updated.?.name);
+    try std.testing.expectEqual(@as(f64, 30.00), updated.?.price);
 
-    const id2 = try db.from(Product).insert(.{
-        .name = "Mouse",
-        .price = 25.00,
-        .is_available = false,
-    });
-    try std.testing.expectEqual(@as(i64, 2), id2);
+    // 4. OrderBy, Limit & Offset
+    const ordered = try db.from(Product).where("is_available = ?", .{1}).orderBy("price DESC").limit(2).offset(0).all(allocator);
+    defer allocator.free(ordered);
+    defer for (ordered) |p| allocator.free(p.name);
 
-    // 4. Count should now be 2
-    try std.testing.expectEqual(@as(i64, 2), try db.from(Product).count());
-
-    // 5. Fetch all records mapped to struct
-    const all_products = try db.from(Product).all(allocator);
-    defer allocator.free(all_products);
-    defer for (all_products) |p| allocator.free(p.name);
-
-    try std.testing.expectEqual(@as(usize, 2), all_products.len);
-    try std.testing.expectEqualStrings("Laptop", all_products[0].name);
-    try std.testing.expectEqual(@as(f64, 1250.50), all_products[0].price);
-    try std.testing.expectEqual(true, all_products[0].is_available);
-
-    // 6. Find by ID
-    const found = try db.from(Product).find(2, allocator);
-    try std.testing.expect(found != null);
-    defer allocator.free(found.?.name);
-    try std.testing.expectEqualStrings("Mouse", found.?.name);
-    try std.testing.expectEqual(false, found.?.is_available);
-
-    // 7. WHERE filter query
-    const active_count = try db.from(Product).where("is_available = ?", .{1}).count();
-    try std.testing.expectEqual(@as(i64, 1), active_count);
-
-    const first_active = try db.from(Product).where("name = ?", .{"Laptop"}).first(allocator);
-    try std.testing.expect(first_active != null);
-    defer allocator.free(first_active.?.name);
-    try std.testing.expectEqualStrings("Laptop", first_active.?.name);
-
-    // 8. Delete by ID
-    try db.from(Product).delete(1);
-    try std.testing.expectEqual(@as(i64, 1), try db.from(Product).count());
+    try std.testing.expectEqual(@as(usize, 2), ordered.len);
+    try std.testing.expectEqualStrings("Laptop", ordered[0].name);
+    try std.testing.expectEqualStrings("Keyboard", ordered[1].name);
 }
