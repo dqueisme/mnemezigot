@@ -4,6 +4,13 @@ pub const c = @cImport({
     @cInclude("sqlite3.h");
 });
 
+/// Database Migration representation
+pub const Migration = struct {
+    version: usize,
+    name: []const u8,
+    sql: []const u8,
+};
+
 /// Embedded SQLite 3.46 Database Engine
 /// MANDATORY ZERO-CONFIG: Write-Ahead Logging (WAL) Mode Active by Default
 pub const Database = struct {
@@ -77,6 +84,59 @@ pub const Database = struct {
         }
     }
 
+    /// Execute a function block within an atomic SQLite transaction
+    pub fn transaction(self: *Database, comptime func: fn (*Database) anyerror!void) !void {
+        try self.exec("BEGIN TRANSACTION;");
+        func(self) catch |err| {
+            try self.exec("ROLLBACK;");
+            return err;
+        };
+        try self.exec("COMMIT;");
+    }
+
+    /// Execute database migrations automatically tracking versions in `schema_migrations`
+    pub fn migrate(self: *Database, migrations: []const Migration) !void {
+        try self.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);");
+
+        for (migrations) |m| {
+            var z_sql: [1024:0]u8 = undefined;
+            const sql_check = "SELECT COUNT(*) FROM schema_migrations WHERE version = ?;";
+            @memcpy(z_sql[0..sql_check.len], sql_check);
+            z_sql[sql_check.len] = 0;
+
+            self.acquireLock();
+            var stmt: ?*c.sqlite3_stmt = null;
+            if (c.sqlite3_prepare_v2(self.handle, &z_sql, -1, &stmt, null) != c.SQLITE_OK) {
+                self.releaseLock();
+                return error.PrepareFailed;
+            }
+            _ = c.sqlite3_bind_int64(stmt, 1, @intCast(m.version));
+            const exists = (c.sqlite3_step(stmt) == c.SQLITE_ROW and c.sqlite3_column_int64(stmt, 0) > 0);
+            _ = c.sqlite3_finalize(stmt);
+            self.releaseLock();
+
+            if (!exists) {
+                std.debug.print("🔄 [Mnemezigot DB] Applying migration v{d}: {s}\n", .{ m.version, m.name });
+                try self.exec(m.sql);
+
+                var z_ins: [1024:0]u8 = undefined;
+                const sql_ins = "INSERT INTO schema_migrations (version, name) VALUES (?, ?);";
+                @memcpy(z_ins[0..sql_ins.len], sql_ins);
+                z_ins[sql_ins.len] = 0;
+
+                self.acquireLock();
+                var stmt_ins: ?*c.sqlite3_stmt = null;
+                if (c.sqlite3_prepare_v2(self.handle, &z_ins, -1, &stmt_ins, null) == c.SQLITE_OK) {
+                    _ = c.sqlite3_bind_int64(stmt_ins, 1, @intCast(m.version));
+                    _ = c.sqlite3_bind_text(stmt_ins, 2, m.name.ptr, @intCast(m.name.len), c.SQLITE_STATIC);
+                    _ = c.sqlite3_step(stmt_ins);
+                    _ = c.sqlite3_finalize(stmt_ins);
+                }
+                self.releaseLock();
+            }
+        }
+    }
+
     /// Execute an INSERT with a single text parameter (Convenience helper)
     pub fn insertText(self: *Database, sql: []const u8, text: []const u8) !void {
         self.acquireLock();
@@ -136,3 +196,31 @@ pub const Database = struct {
         }
     }
 };
+
+test "Database Migration & Transaction test" {
+    var db = try Database.init(":memory:");
+    defer db.deinit();
+
+    const migrations = [_]Migration{
+        .{ .version = 1, .name = "create_users", .sql = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);" },
+        .{ .version = 2, .name = "add_email", .sql = "ALTER TABLE users ADD COLUMN email TEXT;" },
+    };
+
+    try db.migrate(&migrations);
+    try db.migrate(&migrations); // Re-run should be idempotent
+
+    const migration_count = try db.queryScalarInt("SELECT COUNT(*) FROM schema_migrations;");
+    try std.testing.expectEqual(@as(i64, 2), migration_count);
+
+    // Test Transaction
+    const Tx = struct {
+        fn run(d: *Database) !void {
+            try d.exec("INSERT INTO users (name, email) VALUES ('Alice', 'alice@test.com');");
+            try d.exec("INSERT INTO users (name, email) VALUES ('Bob', 'bob@test.com');");
+        }
+    };
+
+    try db.transaction(Tx.run);
+    const user_count = try db.queryScalarInt("SELECT COUNT(*) FROM users;");
+    try std.testing.expectEqual(@as(i64, 2), user_count);
+}
