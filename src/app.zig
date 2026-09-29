@@ -4,6 +4,36 @@ const Database = @import("db.zig").Database;
 const context_mod = @import("context.zig");
 pub const Context = context_mod.Context;
 pub const HandlerFn = context_mod.HandlerFn;
+pub const MiddlewareFn = context_mod.MiddlewareFn;
+
+/// Built-in Middlewares
+pub const middleware = struct {
+    /// Logger middleware to log request details and execution duration
+    pub fn logger(ctx: *Context, next: HandlerFn) !void {
+        const start = std.time.milliTimestamp();
+        const method = @tagName(ctx.req.method);
+        const url = ctx.req.url.path;
+
+        try next(ctx);
+
+        const duration = std.time.milliTimestamp() - start;
+        std.debug.print("⚡ [HTTP] {s} {s} {d} - {d}ms\n", .{ method, url, ctx.res.status, duration });
+    }
+
+    /// CORS middleware to allow cross-origin requests
+    pub fn cors(ctx: *Context, next: HandlerFn) !void {
+        ctx.res.header("Access-Control-Allow-Origin", "*");
+        ctx.res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD");
+        ctx.res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+        if (ctx.req.method == .OPTIONS) {
+            ctx.res.status = 204;
+            return;
+        }
+
+        try next(ctx);
+    }
+};
 
 pub const AppConfig = struct {
     port: u16 = 8080,
@@ -14,11 +44,61 @@ pub const AppConfig = struct {
 // Global reference for static route dispatchers
 var g_app_ptr: ?*App = null;
 
+/// Sub-router Group struct
+pub const Group = struct {
+    app: *App,
+    prefix: []const u8,
+    middlewares: std.ArrayList(MiddlewareFn),
+
+    pub fn init(app: *App, prefix: []const u8) Group {
+        return .{
+            .app = app,
+            .prefix = prefix,
+            .middlewares = std.ArrayList(MiddlewareFn).empty,
+        };
+    }
+
+    pub fn use(self: *Group, mw: MiddlewareFn) !void {
+        try self.middlewares.append(self.app.allocator, mw);
+    }
+
+    fn joinPath(self: *Group, path: []const u8) ![]const u8 {
+        if (std.mem.eql(u8, self.prefix, "/") or self.prefix.len == 0) {
+            return path;
+        }
+        if (std.mem.eql(u8, path, "/") or path.len == 0) {
+            return self.prefix;
+        }
+        return try std.fmt.allocPrint(self.app.allocator, "{s}{s}", .{ self.prefix, path });
+    }
+
+    pub fn get(self: *Group, path: []const u8, comptime handler: HandlerFn) !void {
+        const full_path = try self.joinPath(path);
+        try self.app.getWithGroup(full_path, handler, self.middlewares.items);
+    }
+
+    pub fn post(self: *Group, path: []const u8, comptime handler: HandlerFn) !void {
+        const full_path = try self.joinPath(path);
+        try self.app.postWithGroup(full_path, handler, self.middlewares.items);
+    }
+
+    pub fn put(self: *Group, path: []const u8, comptime handler: HandlerFn) !void {
+        const full_path = try self.joinPath(path);
+        try self.app.putWithGroup(full_path, handler, self.middlewares.items);
+    }
+
+    pub fn delete(self: *Group, path: []const u8, comptime handler: HandlerFn) !void {
+        const full_path = try self.joinPath(path);
+        try self.app.deleteWithGroup(full_path, handler, self.middlewares.items);
+    }
+};
+
 pub const App = struct {
     db: Database,
     server: httpz.Server(void),
     config: AppConfig,
     allocator: std.mem.Allocator,
+    global_middlewares: std.ArrayList(MiddlewareFn),
 
     pub fn init(allocator: std.mem.Allocator, config: AppConfig) !App {
         // 1. Initialize SQLite Database with MANDATORY WAL Mode (Zero-Config)
@@ -41,7 +121,7 @@ pub const App = struct {
                 .retain_allocated_bytes = 4096,
             },
             .request = .{
-                .buffer_size = 8192, // 8 KB header buffer (supports all desktop browsers)
+                .buffer_size = 8192, // 8 KB header buffer
                 .max_header_count = 64,
                 .max_form_count = 0,
                 .max_multiform_count = 0,
@@ -60,14 +140,48 @@ pub const App = struct {
             .server = server,
             .config = config,
             .allocator = allocator,
+            .global_middlewares = std.ArrayList(MiddlewareFn).empty,
         };
 
         return app;
     }
 
-    /// Compile-time handler wrapper
-    pub fn wrap(comptime handler: HandlerFn) fn (*httpz.Request, *httpz.Response) anyerror!void {
-        const Wrapper = struct {
+    /// Add global middleware
+    pub fn use(self: *App, mw: MiddlewareFn) !void {
+        try self.global_middlewares.append(self.allocator, mw);
+    }
+
+    /// Create route group with prefix
+    pub fn group(self: *App, prefix: []const u8) Group {
+        return Group.init(self, prefix);
+    }
+
+    /// Dispatch handler wrapping pipeline execution
+    pub fn dispatch(ctx: *Context, route_mws: []const MiddlewareFn, handler: HandlerFn) !void {
+        var all_mws: std.ArrayList(MiddlewareFn) = .empty;
+        defer all_mws.deinit(ctx.res.arena);
+
+        if (g_app_ptr) |app| {
+            for (app.global_middlewares.items) |mw| {
+                try all_mws.append(ctx.res.arena, mw);
+            }
+        }
+        for (route_mws) |mw| {
+            try all_mws.append(ctx.res.arena, mw);
+        }
+
+        ctx.mws = all_mws.items;
+        ctx.mw_index = 0;
+        ctx.handler = handler;
+
+        try ctx.next();
+    }
+
+    /// Create a handler dispatcher function bound to group/route-specific middlewares
+    pub fn createHandlerWithMiddlewares(comptime handler: HandlerFn, route_mws: []const MiddlewareFn) fn (*httpz.Request, *httpz.Response) anyerror!void {
+        const Holder = struct {
+            var mws_storage: ?[]const MiddlewareFn = null;
+
             fn handle(req: *httpz.Request, res: *httpz.Response) anyerror!void {
                 if (g_app_ptr) |app| {
                     var ctx = Context{
@@ -76,36 +190,68 @@ pub const App = struct {
                         .db = &app.db,
                         .arena = res.arena,
                     };
-                    try handler(&ctx);
+
+                    try dispatch(&ctx, mws_storage orelse &.{}, handler);
                 }
             }
         };
-        return Wrapper.handle;
+
+        Holder.mws_storage = route_mws;
+        return Holder.handle;
     }
 
     /// Register a GET route
     pub fn get(self: *App, path: []const u8, comptime handler: HandlerFn) !void {
-        var r = try self.server.router(.{});
-        r.get(path, wrap(handler), .{});
-        r.head(path, wrap(handler), .{});
+        try self.getWithGroup(path, handler, &.{});
     }
 
     /// Register a POST route
     pub fn post(self: *App, path: []const u8, comptime handler: HandlerFn) !void {
-        var r = try self.server.router(.{});
-        r.post(path, wrap(handler), .{});
+        try self.postWithGroup(path, handler, &.{});
     }
 
     /// Register a PUT route
     pub fn put(self: *App, path: []const u8, comptime handler: HandlerFn) !void {
-        var r = try self.server.router(.{});
-        r.put(path, wrap(handler), .{});
+        try self.putWithGroup(path, handler, &.{});
     }
 
     /// Register a DELETE route
     pub fn delete(self: *App, path: []const u8, comptime handler: HandlerFn) !void {
+        try self.deleteWithGroup(path, handler, &.{});
+    }
+
+    /// Internal route registration helpers for Groups
+    pub fn getWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
+        const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
+        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+
         var r = try self.server.router(.{});
-        r.delete(path, wrap(handler), .{});
+        r.get(path, wrapper, .{});
+        r.head(path, wrapper, .{});
+    }
+
+    pub fn postWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
+        const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
+        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+
+        var r = try self.server.router(.{});
+        r.post(path, wrapper, .{});
+    }
+
+    pub fn putWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
+        const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
+        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+
+        var r = try self.server.router(.{});
+        r.put(path, wrapper, .{});
+    }
+
+    pub fn deleteWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
+        const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
+        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+
+        var r = try self.server.router(.{});
+        r.delete(path, wrapper, .{});
     }
 
     /// Start listening and serving requests
@@ -126,6 +272,70 @@ pub const App = struct {
         self.server.stop();
         self.server.deinit();
         self.db.deinit();
+        self.global_middlewares.deinit(self.allocator);
         g_app_ptr = null;
     }
 };
+
+test "Middleware chain execution test" {
+    var executed_steps: std.ArrayList(u8) = std.ArrayList(u8).empty;
+    defer executed_steps.deinit(std.testing.allocator);
+
+    const TestEnv = struct {
+        var steps: *std.ArrayList(u8) = undefined;
+
+        fn mw1(ctx: *Context, next: HandlerFn) !void {
+            try steps.append(std.testing.allocator, 1);
+            try next(ctx);
+            try steps.append(std.testing.allocator, 4);
+        }
+
+        fn mw2(ctx: *Context, next: HandlerFn) !void {
+            try steps.append(std.testing.allocator, 2);
+            try next(ctx);
+        }
+
+        fn finalHandler(ctx: *Context) !void {
+            _ = ctx;
+            try steps.append(std.testing.allocator, 3);
+        }
+    };
+
+    TestEnv.steps = &executed_steps;
+
+    var db = try Database.init(":memory:");
+    defer db.deinit();
+
+    const mws = [_]MiddlewareFn{ TestEnv.mw1, TestEnv.mw2 };
+    var dummy_ctx = Context{
+        .req = undefined,
+        .res = undefined,
+        .db = &db,
+        .arena = std.testing.allocator,
+        .mws = &mws,
+        .mw_index = 0,
+        .handler = TestEnv.finalHandler,
+    };
+
+    try dummy_ctx.next();
+
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, executed_steps.items);
+}
+
+test "Group route middleware forwarding test" {
+    var app = try App.init(std.testing.allocator, .{ .port = 0, .db_path = ":memory:" });
+    defer app.deinit();
+
+    const Dummy = struct {
+        fn mw(ctx: *Context, next: HandlerFn) !void {
+            try next(ctx);
+        }
+        fn handler(ctx: *Context) !void {
+            try ctx.text("ok");
+        }
+    };
+
+    var v1 = app.group("/api/v1");
+    try v1.use(Dummy.mw);
+    try v1.get("/users", Dummy.handler);
+}
