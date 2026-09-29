@@ -22,6 +22,8 @@ pub const client = @import("client.zig");
 pub const model = @import("model.zig");
 pub const ModelQuery = model.ModelQuery;
 
+pub const html = @import("html.zig");
+
 test {
     std.testing.refAllDecls(@This());
 }

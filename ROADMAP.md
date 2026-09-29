@@ -62,10 +62,10 @@ Mnemezigot dirancang sebagai web framework berperforma tinggi, ringan, dan zero-
 
 ### 3. 🌐 Real-Time & Output Features (Medium Priority)
 
-- [ ] **Server-Sent Events (SSE) & WebSocket Support**
+- [x] **Server-Sent Events (SSE) & WebSocket Support**
   - Streaming data real-time berbasis event dari backend Zig ke WASM Client / Browser UI secara efisien.
 
-- [ ] **Type-Safe HTML Component Builder & HTMX Integration**
+- [x] **Type-Safe HTML Component Builder & HTMX Integration**
   - Helper untuk merender komponen HTML secara type-safe di Zig tanpa overhead template engine berat, dengan integrasi siap pakai untuk HTMX.
 
 ---
