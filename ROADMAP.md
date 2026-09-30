@@ -72,7 +72,7 @@ Mnemezigot dirancang sebagai web framework berperforma tinggi, ringan, dan zero-
 
 ### 4. 🛠️ Tooling & Developer Experience (DevX)
 
-- [ ] **CLI Watcher / Hot Reload Tool**
+- [x] **CLI Watcher / Hot Reload Tool**
   - Utility CLI sederhana untuk auto-rebuild & auto-restart server Mnemezigot saat terjadi perubahan file source code `.zig`.
 
 - [ ] **Project Generator (CLI Scaffolding)**
