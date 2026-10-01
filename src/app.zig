@@ -33,6 +33,23 @@ pub const middleware = struct {
 
         try next(ctx);
     }
+
+    /// Bearer Authorization middleware checking Authorization header
+    pub fn bearerAuth(ctx: *Context, next: HandlerFn) !void {
+        const auth_hdr = ctx.getHeader("Authorization") orelse {
+            ctx.status(401);
+            try ctx.json(.{ .error = "Missing Authorization header" });
+            return;
+        };
+
+        if (!std.mem.startsWith(u8, auth_hdr, "Bearer ")) {
+            ctx.status(401);
+            try ctx.json(.{ .error = "Invalid Authorization scheme" });
+            return;
+        }
+
+        try next(ctx);
+    }
 };
 
 pub const AppConfig = struct {

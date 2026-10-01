@@ -22,6 +22,13 @@ pub const client = @import("client.zig");
 pub const model = @import("model.zig");
 pub const ModelQuery = model.ModelQuery;
 
+pub const html = @import("html.zig");
+pub const crypto_mod = @import("crypto.zig");
+pub const crypto = crypto_mod.crypto;
+
+pub const security_mod = @import("security.zig");
+pub const totp = security_mod.totp;
+
 test {
     std.testing.refAllDecls(@This());
 }

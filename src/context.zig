@@ -50,6 +50,11 @@ pub const Context = struct {
     mw_index: usize = 0,
     handler: ?HandlerFn = null,
 
+    // Auth Context properties
+    user_id: ?i64 = null,
+    username: ?[]const u8 = null,
+    user: ?*anyopaque = null,
+
     /// Execute next middleware in pipeline or final route handler
     pub fn next(self: *Context) anyerror!void {
         if (self.mw_index < self.mws.len) {
@@ -101,6 +106,44 @@ pub const Context = struct {
         self.res.header("Access-Control-Allow-Origin", "*");
         self.res.header("Cache-Control", "public, max-age=3600");
         self.res.body = content;
+    }
+
+    // =========================================================================
+    // REAL-TIME: Server-Sent Events (SSE)
+    // =========================================================================
+
+    /// Initialize Server-Sent Events headers
+    pub fn sseInit(self: *Context) void {
+        self.res.header("Content-Type", "text/event-stream");
+        self.res.header("Cache-Control", "no-cache");
+        self.res.header("Connection", "keep-alive");
+        self.res.header("Access-Control-Allow-Origin", "*");
+    }
+
+    /// Format and append an SSE event payload to response body
+    pub fn sendSseEvent(self: *Context, event_name: []const u8, data: []const u8) !void {
+        self.sseInit();
+        const formatted = try std.fmt.allocPrint(self.res.arena, "event: {s}\ndata: {s}\n\n", .{ event_name, data });
+        self.res.body = formatted;
+    }
+
+    // =========================================================================
+    // HTMX INTEGRATION HELPERS
+    // =========================================================================
+
+    /// Check if request was triggered by HTMX (HX-Request header present)
+    pub fn isHtmx(self: *Context) bool {
+        return self.getHeader("HX-Request") != null;
+    }
+
+    /// Trigger client-side event in HTMX via HX-Trigger header
+    pub fn htmxTrigger(self: *Context, event_name: []const u8) void {
+        self.res.header("HX-Trigger", event_name);
+    }
+
+    /// Client-side redirect for HTMX via HX-Redirect header
+    pub fn htmxRedirect(self: *Context, url: []const u8) void {
+        self.res.header("HX-Redirect", url);
     }
 
     // =========================================================================
