@@ -50,6 +50,11 @@ pub const Context = struct {
     mw_index: usize = 0,
     handler: ?HandlerFn = null,
 
+    // Auth Context properties
+    user_id: ?i64 = null,
+    username: ?[]const u8 = null,
+    user: ?*anyopaque = null,
+
     /// Execute next middleware in pipeline or final route handler
     pub fn next(self: *Context) anyerror!void {
         if (self.mw_index < self.mws.len) {
