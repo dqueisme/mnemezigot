@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Password Hashing & Crypto Helper Module using std.crypto
+/// Password Hashing, Token Signing (JWT / HMAC) & Crypto Helper Module using std.crypto
 pub const crypto = struct {
     /// Hash raw password using PBKDF2 HMAC-SHA256 with 64,000 iterations
     pub fn hashPassword(allocator: std.mem.Allocator, password: []const u8) ![]const u8 {
@@ -38,6 +38,38 @@ pub const crypto = struct {
 
         return std.crypto.utils.timingSafeEql([32]u8, expected_hash, actual_hash);
     }
+
+    /// Sign a payload string with a secret key using HMAC-SHA256 ("payload.hex_signature")
+    pub fn signToken(allocator: std.mem.Allocator, payload: []const u8, secret: []const u8) ![]const u8 {
+        var mac: [32]u8 = undefined;
+        std.crypto.auth.hmac.sha2.HmacSha256.create(&mac, payload, secret);
+
+        var hex_sig_buf: [64]u8 = undefined;
+        const hex_sig = std.fmt.bufPrint(&hex_sig_buf, "{s}", .{std.fmt.fmtSliceHexLower(&mac)}) catch unreachable;
+
+        return try std.fmt.allocPrint(allocator, "{s}.{s}", .{ payload, hex_sig });
+    }
+
+    /// Verify a signed token ("payload.hex_signature") and return the payload if valid
+    pub fn verifyToken(token: []const u8, secret: []const u8) ?[]const u8 {
+        const dot_idx = std.mem.lastIndexOfScalar(u8, token, '.') orelse return null;
+        const payload = token[0..dot_idx];
+        const hex_sig = token[dot_idx + 1 ..];
+
+        if (hex_sig.len != 64) return null;
+
+        var expected_mac: [32]u8 = undefined;
+        _ = std.fmt.hexToBytes(&expected_mac, hex_sig) catch return null;
+
+        var actual_mac: [32]u8 = undefined;
+        std.crypto.auth.hmac.sha2.HmacSha256.create(&actual_mac, payload, secret);
+
+        if (std.crypto.utils.timingSafeEql([32]u8, expected_mac, actual_mac)) {
+            return payload;
+        }
+
+        return null;
+    }
 };
 
 test "Password hashing and verification" {
@@ -49,4 +81,19 @@ test "Password hashing and verification" {
 
     try std.testing.expect(crypto.verifyPassword(password, hashed));
     try std.testing.expect(!crypto.verifyPassword("WrongPassword", hashed));
+}
+
+test "Token signing and verification" {
+    const allocator = std.testing.allocator;
+    const secret = "my-jwt-secret-key";
+    const payload = "user_id=1001;role=admin";
+
+    const token = try crypto.signToken(allocator, payload, secret);
+    defer allocator.free(token);
+
+    const verified = crypto.verifyToken(token, secret);
+    try std.testing.expect(verified != null);
+    try std.testing.expectEqualStrings(payload, verified.?);
+
+    try std.testing.expect(crypto.verifyToken(token, "wrong-secret") == null);
 }

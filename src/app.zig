@@ -34,6 +34,18 @@ pub const middleware = struct {
         try next(ctx);
     }
 
+    /// Security Headers middleware enforcing browser hardening headers
+    pub fn securityHeaders(ctx: *Context, next: HandlerFn) !void {
+        ctx.res.header("X-Frame-Options", "DENY");
+        ctx.res.header("X-Content-Type-Options", "nosniff");
+        ctx.res.header("X-XSS-Protection", "1; mode=block");
+        ctx.res.header("Referrer-Policy", "strict-origin-when-cross-origin");
+        ctx.res.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        ctx.res.header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline';");
+
+        try next(ctx);
+    }
+
     /// Bearer Authorization middleware checking Authorization header
     pub fn bearerAuth(ctx: *Context, next: HandlerFn) !void {
         const auth_hdr = ctx.getHeader("Authorization") orelse {
@@ -45,6 +57,34 @@ pub const middleware = struct {
         if (!std.mem.startsWith(u8, auth_hdr, "Bearer ")) {
             ctx.status(401);
             try ctx.json(.{ .error = "Invalid Authorization scheme" });
+            return;
+        }
+
+        try next(ctx);
+    }
+
+    /// CSRF Protection middleware verifying Double-Submit Cookie Pattern
+    pub fn csrf(ctx: *Context, next: HandlerFn) !void {
+        if (ctx.req.method == .GET or ctx.req.method == .HEAD or ctx.req.method == .OPTIONS) {
+            try next(ctx);
+            return;
+        }
+
+        const cookie_token = ctx.cookie("csrf_token") orelse {
+            ctx.status(403);
+            try ctx.json(.{ .error = "Missing CSRF token cookie" });
+            return;
+        };
+
+        const header_token = ctx.getHeader("X-CSRF-Token") orelse {
+            ctx.status(403);
+            try ctx.json(.{ .error = "Missing X-CSRF-Token header" });
+            return;
+        };
+
+        if (!std.mem.eql(u8, cookie_token, header_token)) {
+            ctx.status(403);
+            try ctx.json(.{ .error = "Invalid CSRF token mismatch" });
             return;
         }
 
@@ -116,6 +156,7 @@ pub const App = struct {
     config: AppConfig,
     allocator: std.mem.Allocator,
     global_middlewares: std.ArrayList(MiddlewareFn),
+    route_middlewares: std.ArrayList([]const MiddlewareFn),
 
     pub fn init(allocator: std.mem.Allocator, config: AppConfig) !App {
         // 1. Initialize SQLite Database with MANDATORY WAL Mode (Zero-Config)
@@ -158,6 +199,7 @@ pub const App = struct {
             .config = config,
             .allocator = allocator,
             .global_middlewares = std.ArrayList(MiddlewareFn).empty,
+            .route_middlewares = std.ArrayList([]const MiddlewareFn).empty,
         };
 
         return app;
@@ -195,10 +237,8 @@ pub const App = struct {
     }
 
     /// Create a handler dispatcher function bound to group/route-specific middlewares
-    pub fn createHandlerWithMiddlewares(comptime handler: HandlerFn, route_mws: []const MiddlewareFn) fn (*httpz.Request, *httpz.Response) anyerror!void {
+    pub fn createHandlerWithMiddlewares(comptime handler: HandlerFn) fn (*httpz.Request, *httpz.Response) anyerror!void {
         const Holder = struct {
-            var mws_storage: ?[]const MiddlewareFn = null;
-
             fn handle(req: *httpz.Request, res: *httpz.Response) anyerror!void {
                 if (g_app_ptr) |app| {
                     var ctx = Context{
@@ -208,12 +248,16 @@ pub const App = struct {
                         .arena = res.arena,
                     };
 
-                    try dispatch(&ctx, mws_storage orelse &.{}, handler);
+                    const route_mws = if (app.route_middlewares.items.len > 0)
+                        app.route_middlewares.items[app.route_middlewares.items.len - 1]
+                    else
+                        &.{};
+
+                    try dispatch(&ctx, route_mws, handler);
                 }
             }
         };
 
-        Holder.mws_storage = route_mws;
         return Holder.handle;
     }
 
@@ -240,7 +284,9 @@ pub const App = struct {
     /// Internal route registration helpers for Groups
     pub fn getWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
         const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
-        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+        try self.route_middlewares.append(self.allocator, route_mws);
+
+        const wrapper = createHandlerWithMiddlewares(handler);
 
         var r = try self.server.router(.{});
         r.get(path, wrapper, .{});
@@ -249,7 +295,9 @@ pub const App = struct {
 
     pub fn postWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
         const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
-        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+        try self.route_middlewares.append(self.allocator, route_mws);
+
+        const wrapper = createHandlerWithMiddlewares(handler);
 
         var r = try self.server.router(.{});
         r.post(path, wrapper, .{});
@@ -257,7 +305,9 @@ pub const App = struct {
 
     pub fn putWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
         const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
-        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+        try self.route_middlewares.append(self.allocator, route_mws);
+
+        const wrapper = createHandlerWithMiddlewares(handler);
 
         var r = try self.server.router(.{});
         r.put(path, wrapper, .{});
@@ -265,7 +315,9 @@ pub const App = struct {
 
     pub fn deleteWithGroup(self: *App, path: []const u8, comptime handler: HandlerFn, group_mws: []const MiddlewareFn) !void {
         const route_mws = try self.allocator.dupe(MiddlewareFn, group_mws);
-        const wrapper = createHandlerWithMiddlewares(handler, route_mws);
+        try self.route_middlewares.append(self.allocator, route_mws);
+
+        const wrapper = createHandlerWithMiddlewares(handler);
 
         var r = try self.server.router(.{});
         r.delete(path, wrapper, .{});
@@ -289,6 +341,11 @@ pub const App = struct {
         self.server.stop();
         self.server.deinit();
         self.db.deinit();
+
+        for (self.route_middlewares.items) |mws| {
+            self.allocator.free(mws);
+        }
+        self.route_middlewares.deinit(self.allocator);
         self.global_middlewares.deinit(self.allocator);
         g_app_ptr = null;
     }
