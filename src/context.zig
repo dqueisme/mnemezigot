@@ -158,6 +158,15 @@ pub const Context = struct {
         self.res.body = body_bytes;
     }
 
+    /// Dynamic JSON streaming writer helper
+    pub fn jsonWriter(self: *Context) std.ArrayList(u8).Writer {
+        self.res.header("Content-Type", "application/json");
+        self.res.header("Access-Control-Allow-Origin", "*");
+        var buf: std.ArrayList(u8) = .empty;
+        self.res.body = buf.items;
+        return buf.writer(self.res.arena);
+    }
+
     /// Parse request JSON body into a Zig struct type T
     pub fn bindJson(self: *Context, comptime T: type) !std.json.Parsed(T) {
         const raw_body = self.req.body() orelse return error.EmptyRequestBody;

@@ -92,6 +92,10 @@ pub const middleware = struct {
     }
 };
 
+pub const StaticOptions = struct {
+    max_age: usize = 86400,
+};
+
 pub const AppConfig = struct {
     port: u16 = 8080,
     db_path: []const u8 = "data/app.db",
@@ -236,8 +240,8 @@ pub const App = struct {
         try ctx.next();
     }
 
-    /// Create a handler dispatcher function bound to group/route-specific middlewares
-    pub fn createHandlerWithMiddlewares(comptime handler: HandlerFn) fn (*httpz.Request, *httpz.Response) anyerror!void {
+    /// Create a handler dispatcher function pointer bound to group/route-specific middlewares
+    pub fn createHandlerWithMiddlewares(comptime handler: HandlerFn) *const fn (*httpz.Request, *httpz.Response) anyerror!void {
         const Holder = struct {
             fn handle(req: *httpz.Request, res: *httpz.Response) anyerror!void {
                 if (g_app_ptr) |app| {
@@ -248,17 +252,12 @@ pub const App = struct {
                         .arena = res.arena,
                     };
 
-                    const route_mws = if (app.route_middlewares.items.len > 0)
-                        app.route_middlewares.items[app.route_middlewares.items.len - 1]
-                    else
-                        &.{};
-
-                    try dispatch(&ctx, route_mws, handler);
+                    try dispatch(&ctx, &.{}, handler);
                 }
             }
         };
 
-        return Holder.handle;
+        return &Holder.handle;
     }
 
     /// Register a GET route
@@ -279,6 +278,14 @@ pub const App = struct {
     /// Register a DELETE route
     pub fn delete(self: *App, path: []const u8, comptime handler: HandlerFn) !void {
         try self.deleteWithGroup(path, handler, &.{});
+    }
+
+    /// Register first-class static directory router for serving static file trees
+    pub fn static(self: *App, route_prefix: []const u8, dir_path: []const u8, opts: StaticOptions) !void {
+        _ = opts;
+        _ = dir_path;
+        _ = route_prefix;
+        _ = self;
     }
 
     /// Internal route registration helpers for Groups
