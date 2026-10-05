@@ -252,7 +252,12 @@ pub const App = struct {
                         .arena = res.arena,
                     };
 
-                    try dispatch(&ctx, &.{}, handler);
+                    const route_mws = if (app.route_middlewares.items.len > 0)
+                        app.route_middlewares.items[app.route_middlewares.items.len - 1]
+                    else
+                        &.{};
+
+                    try dispatch(&ctx, route_mws, handler);
                 }
             }
         };

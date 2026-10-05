@@ -2,6 +2,7 @@ const std = @import("std");
 const httpz = @import("httpz");
 const Database = @import("db.zig").Database;
 const grpc = @import("grpc.zig");
+const ws_mod = @import("ws.zig");
 
 pub const HandlerFn = *const fn (*Context) anyerror!void;
 
@@ -65,6 +66,27 @@ pub const Context = struct {
         } else if (self.handler) |h| {
             try h(self);
         }
+    }
+
+    // =========================================================================
+    // WEBSOCKET INTEGRATION HELPERS
+    // =========================================================================
+
+    /// Check if request is a WebSocket upgrade request
+    pub fn isWs(self: *Context) bool {
+        const upgrade = self.getHeader("Upgrade") orelse return false;
+        return std.ascii.eqlIgnoreCase(upgrade, "websocket");
+    }
+
+    /// Perform RFC 6455 WebSocket Upgrade Handshake
+    pub fn wsUpgrade(self: *Context) !void {
+        const sec_key = self.getHeader("Sec-WebSocket-Key") orelse return error.MissingSecWebSocketKey;
+        const accept_key = try ws_mod.computeAcceptKey(self.res.arena, sec_key);
+
+        self.res.status = 101;
+        self.res.header("Upgrade", "websocket");
+        self.res.header("Connection", "Upgrade");
+        self.res.header("Sec-WebSocket-Accept", accept_key);
     }
 
     // =========================================================================

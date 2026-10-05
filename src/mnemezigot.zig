@@ -29,6 +29,11 @@ pub const crypto = crypto_mod.crypto;
 pub const security_mod = @import("security.zig");
 pub const totp = security_mod.totp;
 
+pub const ws = @import("ws.zig");
+pub const WsHub = ws.WsHub;
+pub const Frame = ws.Frame;
+pub const computeAcceptKey = ws.computeAcceptKey;
+
 test {
     std.testing.refAllDecls(@This());
 }
