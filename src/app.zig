@@ -50,13 +50,13 @@ pub const middleware = struct {
     pub fn bearerAuth(ctx: *Context, next: HandlerFn) !void {
         const auth_hdr = ctx.getHeader("Authorization") orelse {
             ctx.status(401);
-            try ctx.json(.{ .error = "Missing Authorization header" });
+            try ctx.json(.{ .@"error" = "Missing Authorization header" });
             return;
         };
 
         if (!std.mem.startsWith(u8, auth_hdr, "Bearer ")) {
             ctx.status(401);
-            try ctx.json(.{ .error = "Invalid Authorization scheme" });
+            try ctx.json(.{ .@"error" = "Invalid Authorization scheme" });
             return;
         }
 
@@ -72,19 +72,19 @@ pub const middleware = struct {
 
         const cookie_token = ctx.cookie("csrf_token") orelse {
             ctx.status(403);
-            try ctx.json(.{ .error = "Missing CSRF token cookie" });
+            try ctx.json(.{ .@"error" = "Missing CSRF token cookie" });
             return;
         };
 
         const header_token = ctx.getHeader("X-CSRF-Token") orelse {
             ctx.status(403);
-            try ctx.json(.{ .error = "Missing X-CSRF-Token header" });
+            try ctx.json(.{ .@"error" = "Missing X-CSRF-Token header" });
             return;
         };
 
         if (!std.mem.eql(u8, cookie_token, header_token)) {
             ctx.status(403);
-            try ctx.json(.{ .error = "Invalid CSRF token mismatch" });
+            try ctx.json(.{ .@"error" = "Invalid CSRF token mismatch" });
             return;
         }
 

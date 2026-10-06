@@ -25,10 +25,10 @@ pub const Node = struct {
 
         try std.fmt.format(buf.writer(allocator), "<{s}", .{self.tag});
 
-        for (self.attrs) |attr| {
-            const escaped_val = try escapeHtml(allocator, attr.value);
+        for (self.attrs) |a| {
+            const escaped_val = try escapeHtml(allocator, a.value);
             defer allocator.free(escaped_val);
-            try std.fmt.format(buf.writer(allocator), " {s}=\"{s}\"", .{ attr.name, escaped_val });
+            try std.fmt.format(buf.writer(allocator), " {s}=\"{s}\"", .{ a.name, escaped_val });
         }
 
         // Self-closing void tags
