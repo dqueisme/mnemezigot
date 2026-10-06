@@ -34,6 +34,9 @@ pub const WsHub = ws.WsHub;
 pub const Frame = ws.Frame;
 pub const computeAcceptKey = ws.computeAcceptKey;
 
+pub const realtime = @import("realtime.zig");
+pub const RealtimeHub = realtime.RealtimeHub;
+
 test {
     std.testing.refAllDecls(@This());
 }
