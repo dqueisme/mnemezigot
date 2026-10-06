@@ -50,7 +50,25 @@ pub fn build(b: *std.Build) void {
     const watch_step = b.step("watch", "Run CLI watcher / hot reload tool");
     watch_step.dependOn(&run_watcher.step);
 
-    // 5. Framework Unit Tests (`zig build test`)
+    // 5. CLI Project Generator Executable (`zig build new -- project_name`)
+    const generator_exe = b.addExecutable(.{
+        .name = "mnemezigot-new",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/generator.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(generator_exe);
+
+    const run_generator = b.addRunArtifact(generator_exe);
+    if (b.args) |args| {
+        run_generator.addArgs(args);
+    }
+    const new_step = b.step("new", "Create new Mnemezigot project template");
+    new_step.dependOn(&run_generator.step);
+
+    // 6. Framework Unit Tests (`zig build test`)
     const main_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/mnemezigot.zig"),
