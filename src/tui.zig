@@ -54,6 +54,7 @@ pub const KanbanBoard = kanban.KanbanBoard;
 pub const KanbanColumn = kanban.KanbanColumn;
 pub const KanbanCard = kanban.KanbanCard;
 pub const KanbanBadge = kanban.KanbanBadge;
+pub const ProjectSummary = kanban.ProjectSummary;
 
 test {
     std.testing.refAllDecls(@This());
