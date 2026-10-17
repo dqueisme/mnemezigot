@@ -86,4 +86,21 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run framework unit tests");
     test_step.dependOn(&run_main_tests.step);
     test_step.dependOn(&run_watcher_tests.step);
+
+    // 6. TUI Demo Executable (`zig build demo-tui`)
+    const tui_demo_exe = b.addExecutable(.{
+        .name = "tui-demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/tui_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    tui_demo_exe.root_module.addImport("mnemezigot", mnemezigot_mod);
+    b.installArtifact(tui_demo_exe);
+
+    const run_tui_demo = b.addRunArtifact(tui_demo_exe);
+    const demo_tui_step = b.step("demo-tui", "Run interactive TUI dashboard demo");
+    demo_tui_step.dependOn(&run_tui_demo.step);
 }

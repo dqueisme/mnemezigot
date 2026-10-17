@@ -7,7 +7,8 @@ pub const totp = struct {
     /// Generate a random 16-character Base32 secret key
     pub fn generateSecret(allocator: std.mem.Allocator) ![]const u8 {
         var bytes: [10]u8 = undefined;
-        std.crypto.random.bytes(&bytes);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        io.random(&bytes);
 
         var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(allocator);
@@ -84,7 +85,7 @@ pub const totp = struct {
         std.mem.writeInt(u64, &msg, counter, .big);
 
         var mac: [20]u8 = undefined;
-        std.crypto.auth.hmac.sha1.HmacSha1.create(&mac, &msg, key);
+        std.crypto.auth.hmac.HmacSha1.create(&mac, &msg, key);
 
         const offset: usize = mac[19] & 0x0F;
         const truncated: u32 = ((@as(u32, mac[offset] & 0x7F) << 24) |
@@ -119,7 +120,8 @@ test "TOTP Secret Generation, URI, and Code Verification" {
 
     try std.testing.expect(std.mem.indexOf(u8, uri, "otpauth://totp/") != null);
 
-    const now = std.time.timestamp();
+    const io = std.Io.Threaded.global_single_threaded.io();
+    const now = std.Io.Clock.real.now(io).toSeconds();
     const current_code = try totp.generateCode(secret, now);
 
     try std.testing.expect(totp.verifyCode(secret, current_code, now));

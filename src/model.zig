@@ -403,20 +403,20 @@ pub fn FilteredQuery(comptime T: type, comptime clause: []const u8, comptime Arg
             var sql_buf: std.ArrayList(u8) = .empty;
             defer sql_buf.deinit(allocator);
 
-            try std.fmt.format(sql_buf.writer(allocator), "SELECT {s} FROM {s} WHERE {s}", .{
+            try sql_buf.print(allocator, "SELECT {s} FROM {s} WHERE {s}", .{
                 ModelQuery(T).column_list,
                 ModelQuery(T).table_name,
                 clause,
             });
 
             if (self.order_clause) |order| {
-                try std.fmt.format(sql_buf.writer(allocator), " ORDER BY {s}", .{order});
+                try sql_buf.print(allocator, " ORDER BY {s}", .{order});
             }
             if (self.limit_val) |lim| {
-                try std.fmt.format(sql_buf.writer(allocator), " LIMIT {d}", .{lim});
+                try sql_buf.print(allocator, " LIMIT {d}", .{lim});
             }
             if (self.offset_val) |off| {
-                try std.fmt.format(sql_buf.writer(allocator), " OFFSET {d}", .{off});
+                try sql_buf.print(allocator, " OFFSET {d}", .{off});
             }
             try sql_buf.append(allocator, ';');
 
@@ -449,14 +449,14 @@ pub fn FilteredQuery(comptime T: type, comptime clause: []const u8, comptime Arg
             var sql_buf: std.ArrayList(u8) = .empty;
             defer sql_buf.deinit(allocator);
 
-            try std.fmt.format(sql_buf.writer(allocator), "SELECT {s} FROM {s} WHERE {s}", .{
+            try sql_buf.print(allocator, "SELECT {s} FROM {s} WHERE {s}", .{
                 ModelQuery(T).column_list,
                 ModelQuery(T).table_name,
                 clause,
             });
 
             if (self.order_clause) |order| {
-                try std.fmt.format(sql_buf.writer(allocator), " ORDER BY {s}", .{order});
+                try sql_buf.print(allocator, " ORDER BY {s}", .{order});
             }
             try sql_buf.appendSlice(allocator, " LIMIT 1;");
 

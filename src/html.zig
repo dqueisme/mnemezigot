@@ -23,12 +23,12 @@ pub const Node = struct {
         var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(allocator);
 
-        try std.fmt.format(buf.writer(allocator), "<{s}", .{self.tag});
+        try buf.print(allocator, "<{s}", .{self.tag});
 
         for (self.attrs) |a| {
             const escaped_val = try escapeHtml(allocator, a.value);
             defer allocator.free(escaped_val);
-            try std.fmt.format(buf.writer(allocator), " {s}=\"{s}\"", .{ a.name, escaped_val });
+            try buf.print(allocator, " {s}=\"{s}\"", .{ a.name, escaped_val });
         }
 
         // Self-closing void tags
@@ -43,7 +43,7 @@ pub const Node = struct {
             try buf.appendSlice(allocator, child);
         }
 
-        try std.fmt.format(buf.writer(allocator), "</{s}>", .{self.tag});
+        try buf.print(allocator, "</{s}>", .{self.tag});
 
         return buf.toOwnedSlice(allocator);
     }

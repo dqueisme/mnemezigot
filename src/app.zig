@@ -119,6 +119,10 @@ pub const Group = struct {
         };
     }
 
+    pub fn deinit(self: *Group) void {
+        self.middlewares.deinit(self.app.allocator);
+    }
+
     pub fn use(self: *Group, mw: MiddlewareFn) !void {
         try self.middlewares.append(self.app.allocator, mw);
     }
@@ -130,7 +134,9 @@ pub const Group = struct {
         if (std.mem.eql(u8, path, "/") or path.len == 0) {
             return self.prefix;
         }
-        return try std.fmt.allocPrint(self.app.allocator, "{s}{s}", .{ self.prefix, path });
+        const full = try std.fmt.allocPrint(self.app.allocator, "{s}{s}", .{ self.prefix, path });
+        try self.app.allocated_paths.append(self.app.allocator, full);
+        return full;
     }
 
     pub fn get(self: *Group, path: []const u8, comptime handler: HandlerFn) !void {
@@ -159,8 +165,10 @@ pub const App = struct {
     server: httpz.Server(void),
     config: AppConfig,
     allocator: std.mem.Allocator,
+    listening: bool = false,
     global_middlewares: std.ArrayList(MiddlewareFn),
     route_middlewares: std.ArrayList([]const MiddlewareFn),
+    allocated_paths: std.ArrayList([]const u8),
 
     pub fn init(allocator: std.mem.Allocator, config: AppConfig) !App {
         // 1. Initialize SQLite Database with MANDATORY WAL Mode (Zero-Config)
@@ -204,6 +212,7 @@ pub const App = struct {
             .allocator = allocator,
             .global_middlewares = std.ArrayList(MiddlewareFn).empty,
             .route_middlewares = std.ArrayList([]const MiddlewareFn).empty,
+            .allocated_paths = std.ArrayList([]const u8).empty,
         };
 
         return app;
@@ -341,11 +350,14 @@ pub const App = struct {
         std.debug.print("⚡ Outputs: [1] WASM (UI) | [2] JSON (REST) | [3] gRPC-Web\n", .{});
         std.debug.print("======================================================\n\n", .{});
 
+        self.listening = true;
         try self.server.listen();
     }
 
     pub fn deinit(self: *App) void {
-        self.server.stop();
+        if (self.listening) {
+            self.server.stop();
+        }
         self.server.deinit();
         self.db.deinit();
 
@@ -353,6 +365,10 @@ pub const App = struct {
             self.allocator.free(mws);
         }
         self.route_middlewares.deinit(self.allocator);
+        for (self.allocated_paths.items) |p| {
+            self.allocator.free(p);
+        }
+        self.allocated_paths.deinit(self.allocator);
         self.global_middlewares.deinit(self.allocator);
         g_app_ptr = null;
     }
@@ -417,6 +433,7 @@ test "Group route middleware forwarding test" {
     };
 
     var v1 = app.group("/api/v1");
+    defer v1.deinit();
     try v1.use(Dummy.mw);
     try v1.get("/users", Dummy.handler);
 }

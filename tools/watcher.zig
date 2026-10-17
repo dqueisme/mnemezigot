@@ -3,7 +3,7 @@ const std = @import("std");
 /// CLI Watcher / Hot Reload Tool for Mnemezigot Framework
 /// Scans source directory for file modifications (.zig) and auto-restarts application.
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -15,45 +15,47 @@ pub fn main() !void {
     var child_proc: ?std.process.Child = null;
 
     // Start initial build & run
-    child_proc = try spawnApp(allocator);
+    child_proc = try spawnApp();
 
-    var last_check = std.time.milliTimestamp();
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var last_check = std.Io.Clock.real.now(io).toMilliseconds();
 
     while (true) {
-        std.Thread.sleep(1 * std.time.ns_per_s); // Check every second
+        std.Io.sleep(io, std.Io.Duration.fromSeconds(1), .awake) catch {}; // Check every second
 
         const modified = try checkFileModifications(allocator, ".", last_check);
         if (modified) {
             std.debug.print("\n🔄 [Mnemezigot Watcher] Change detected! Rebuilding server...\n", .{});
-            last_check = std.time.milliTimestamp();
+            last_check = std.Io.Clock.real.now(io).toMilliseconds();
 
             if (child_proc) |*proc| {
-                _ = proc.kill() catch {};
+                proc.kill(io);
                 child_proc = null;
             }
 
-            child_proc = spawnApp(allocator) catch |err| {
+            child_proc = spawnApp() catch |err| blk: {
                 std.debug.print("❌ [Mnemezigot Watcher] Failed to restart app: {}\n", .{err});
-                null;
+                break :blk null;
             };
         }
     }
 }
 
-fn spawnApp(allocator: std.mem.Allocator) !std.process.Child {
+fn spawnApp() !std.process.Child {
+    const io = std.Io.Threaded.global_single_threaded.io();
     const argv = [_][]const u8{ "zig", "build", "run" };
-    var proc = std.process.Child.init(&argv, allocator);
-    try proc.spawn();
-    std.debug.print("🚀 [Mnemezigot Watcher] Server process started (PID: {d})\n", .{proc.id});
+    const proc = try std.process.spawn(io, .{ .argv = &argv });
+    std.debug.print("🚀 [Mnemezigot Watcher] Server process started (PID: {?d})\n", .{proc.id});
     return proc;
 }
 
 fn checkFileModifications(allocator: std.mem.Allocator, dir_path: []const u8, threshold_ms: i64) !bool {
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return false;
-    defer dir.close();
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var dir = std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return false;
+    defer dir.close(io);
 
     var iter = dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         if (entry.kind == .directory) {
             if (std.mem.startsWith(u8, entry.name, ".") or std.mem.eql(u8, entry.name, "zig-out") or std.mem.eql(u8, entry.name, "zig-cache")) {
                 continue;
@@ -68,8 +70,8 @@ fn checkFileModifications(allocator: std.mem.Allocator, dir_path: []const u8, th
             const file_path = try std.fs.path.join(allocator, &.{ dir_path, entry.name });
             defer allocator.free(file_path);
 
-            const stat = std.fs.cwd().statFile(file_path) catch continue;
-            const mtime_ms = @divTrunc(stat.mtime, std.time.ns_per_ms);
+            const stat = dir.statFile(io, entry.name, .{}) catch continue;
+            const mtime_ms = stat.mtime.toMilliseconds();
 
             if (mtime_ms > threshold_ms) {
                 std.debug.print("📝 [Mnemezigot Watcher] File modified: {s}\n", .{file_path});

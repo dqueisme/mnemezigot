@@ -29,6 +29,8 @@ pub const crypto = crypto_mod.crypto;
 pub const security_mod = @import("security.zig");
 pub const totp = security_mod.totp;
 
+pub const tui = @import("tui.zig");
+
 test {
     std.testing.refAllDecls(@This());
 }

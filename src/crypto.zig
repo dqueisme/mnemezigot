@@ -5,16 +5,14 @@ pub const crypto = struct {
     /// Hash raw password using PBKDF2 HMAC-SHA256 with 64,000 iterations
     pub fn hashPassword(allocator: std.mem.Allocator, password: []const u8) ![]const u8 {
         var salt: [16]u8 = undefined;
-        std.crypto.random.bytes(&salt);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        io.random(&salt);
 
         var out: [32]u8 = undefined;
         try std.crypto.pwhash.pbkdf2(&out, password, &salt, 64000, std.crypto.auth.hmac.sha2.HmacSha256);
 
-        var hex_salt_buf: [32]u8 = undefined;
-        const hex_salt = std.fmt.bufPrint(&hex_salt_buf, "{s}", .{std.fmt.fmtSliceHexLower(&salt)}) catch unreachable;
-
-        var hex_hash_buf: [64]u8 = undefined;
-        const hex_hash = std.fmt.bufPrint(&hex_hash_buf, "{s}", .{std.fmt.fmtSliceHexLower(&out)}) catch unreachable;
+        const hex_salt = std.fmt.bytesToHex(salt, .lower);
+        const hex_hash = std.fmt.bytesToHex(out, .lower);
 
         return try std.fmt.allocPrint(allocator, "{s}${s}", .{ hex_salt, hex_hash });
     }
@@ -36,7 +34,7 @@ pub const crypto = struct {
         var actual_hash: [32]u8 = undefined;
         std.crypto.pwhash.pbkdf2(&actual_hash, password, &salt, 64000, std.crypto.auth.hmac.sha2.HmacSha256) catch return false;
 
-        return std.crypto.utils.timingSafeEql([32]u8, expected_hash, actual_hash);
+        return std.crypto.timing_safe.eql([32]u8, expected_hash, actual_hash);
     }
 
     /// Sign a payload string with a secret key using HMAC-SHA256 ("payload.hex_signature")
@@ -44,8 +42,7 @@ pub const crypto = struct {
         var mac: [32]u8 = undefined;
         std.crypto.auth.hmac.sha2.HmacSha256.create(&mac, payload, secret);
 
-        var hex_sig_buf: [64]u8 = undefined;
-        const hex_sig = std.fmt.bufPrint(&hex_sig_buf, "{s}", .{std.fmt.fmtSliceHexLower(&mac)}) catch unreachable;
+        const hex_sig = std.fmt.bytesToHex(mac, .lower);
 
         return try std.fmt.allocPrint(allocator, "{s}.{s}", .{ payload, hex_sig });
     }
@@ -64,7 +61,7 @@ pub const crypto = struct {
         var actual_mac: [32]u8 = undefined;
         std.crypto.auth.hmac.sha2.HmacSha256.create(&actual_mac, payload, secret);
 
-        if (std.crypto.utils.timingSafeEql([32]u8, expected_mac, actual_mac)) {
+        if (std.crypto.timing_safe.eql([32]u8, expected_mac, actual_mac)) {
             return payload;
         }
 
