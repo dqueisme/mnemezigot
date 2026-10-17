@@ -235,7 +235,7 @@ pub const KanbanBoard = struct {
         }
     }
 
-    /// Render the Kanban board in modern, robust 2-Pane Master-Detail layout
+    /// Render the Kanban board in modern, robust 2-Pane Master-Detail layout (tui-design Archetype B)
     pub fn renderTwoPane(self: *const KanbanBoard, writer: anytype, term_width: u16, term_height: u16) !void {
         var arena_state = std.heap.ArenaAllocator.init(self.allocator);
         defer arena_state.deinit();
@@ -250,81 +250,86 @@ pub const KanbanBoard = struct {
         const width: usize = @max(@as(usize, term_width), 60);
         const height: usize = @max(@as(usize, term_height), 20);
 
-        // 1. Top Header
-        try style_mod.writeStyled(writer, "📋 ", .bright_cyan, .none, .{ .bold = true });
-        try style_mod.writeStyled(writer, self.title, .bright_white, .none, .{ .bold = true });
-
-        if (self.subtitle) |sub| {
-            try writer.writeAll("  ");
-            try style_mod.writeStyled(writer, sub, .bright_black, .none, .{});
-        }
-        try writer.writeAll("\n");
-
-        if (self.stats_summary) |stats| {
-            try style_mod.writeStyled(writer, stats, .bright_yellow, .none, .{});
-            try writer.writeAll("\n");
-        }
-
-        // Header separator
-        for (0..width) |_| {
-            try style_mod.writeStyled(writer, "═", .cyan, .none, .{});
-        }
-        try writer.writeAll("\n");
-
-        // 2. Render Modal Overlay if active
+        // 1. Render Modal Overlay if active
         if (self.show_modal) {
             try self.renderModal(arena, writer, width);
             return;
         }
 
-        // 3. Compute Split Widths
-        var left_w = (width * 38) / 100;
-        if (left_w < 28) left_w = 28;
-        if (left_w > 45) left_w = 45;
-        const div_w: usize = 3; // " │ "
-        const right_w = if (width > left_w + div_w) width - left_w - div_w else 28;
+        // 2. Top Header Band with Interactive Column Tabs (Archetype B Header)
+        var head_buf: std.ArrayList(u8) = .empty;
+        var hw = style_mod.bufferWriter(arena, &head_buf);
 
-        // 4. Build Left Pane Lines (Menu Kolom + Daftar Kartu)
-        var left_lines = std.ArrayList([]const u8).empty;
+        try hw.print(" \x1b[1;96m📋 {s}\x1b[0m \x1b[90m│\x1b[0m", .{self.title});
 
-        try left_lines.append(arena, "\x1b[1;96m📑 MENU KOLOM KANBAN\x1b[0m");
-
-        // List columns
         for (self.columns.items, 0..) |col, c_idx| {
             const is_col = (c_idx == self.selected_col);
             const num = c_idx + 1;
             const icon = col.icon orelse "📌";
-            var line_buf: std.ArrayList(u8) = .empty;
-            var lw = style_mod.bufferWriter(arena, &line_buf);
-
             if (is_col) {
-                try lw.print("\x1b[1;93m▶ [{d}] {s} {s} ({d})\x1b[0m", .{ num, icon, col.title, col.cards.items.len });
+                try hw.print(" \x1b[7;1;36m [{d}] {s} {s} ({d}) \x1b[0m", .{ num, icon, col.title, col.cards.items.len });
             } else {
-                try lw.print("\x1b[90m  [{d}] {s} {s} ({d})\x1b[0m", .{ num, icon, col.title, col.cards.items.len });
+                try hw.print(" \x1b[90m[{d}] {s}\x1b[0m \x1b[37m{s}\x1b[0m \x1b[90m({d})\x1b[0m", .{ num, icon, col.title, col.cards.items.len });
             }
-            try left_lines.append(arena, line_buf.items);
         }
 
-        // Divider in left pane
-        var div_buf: std.ArrayList(u8) = .empty;
-        var dw = style_mod.bufferWriter(arena, &div_buf);
-        try dw.writeAll("\x1b[90m");
-        for (0..left_w) |_| try dw.writeAll("─");
-        try dw.writeAll("\x1b[0m");
-        try left_lines.append(arena, div_buf.items);
+        const head_vis_w = stringWidth(head_buf.items);
+        try writer.writeAll(head_buf.items);
 
-        // Cards list of active column
-        const active_col = &self.columns.items[self.selected_col];
-        const card_header = try std.fmt.allocPrint(arena, "\x1b[1;96m📋 KARTU: {s} ({d})\x1b[0m", .{ active_col.title, active_col.cards.items.len });
-        try left_lines.append(arena, card_header);
-
-        if (active_col.cards.items.len == 0) {
-            try left_lines.append(arena, "  \x1b[90m(Belum ada kartu di kolom ini)\x1b[0m");
+        // Far right board / subtitle meta
+        if (self.subtitle) |sub| {
+            const sub_vis_w = stringWidth(sub) + 2;
+            if (width > head_vis_w + sub_vis_w) {
+                for (0..(width - head_vis_w - sub_vis_w)) |_| try writer.writeAll(" ");
+                try writer.print("\x1b[90m{s}\x1b[0m  \n", .{sub});
+            } else {
+                try writer.writeAll("\n");
+            }
         } else {
-            const body_height = if (height > 6) height - 6 else 15;
-            const menu_rows_used = self.columns.items.len + 3;
-            const avail_card_rows = if (body_height > menu_rows_used + 1) body_height - menu_rows_used - 1 else 10;
+            try writer.writeAll("\n");
+        }
 
+        // 3. Compute Split Widths
+        var left_w = (width * 38) / 100;
+        if (left_w < 30) left_w = 30;
+        if (left_w > 42) left_w = 42;
+        const right_w = if (width > left_w) width - left_w else 30;
+
+        const left_inner_w = if (left_w >= 2) left_w - 2 else 28;
+        const right_inner_w = if (right_w >= 2) right_w - 2 else 28;
+
+        const body_height = if (height > 4) height - 4 else 15;
+        const avail_card_rows = if (body_height >= 2) body_height - 2 else 10;
+
+        const active_col = &self.columns.items[self.selected_col];
+
+        // 4. Build Left Pane Lines (Card List)
+        var left_lines = std.ArrayList([]const u8).empty;
+
+        // Top Border of Left Pane
+        var ltop_buf: std.ArrayList(u8) = .empty;
+        var ltw = style_mod.bufferWriter(arena, &ltop_buf);
+        const ltitle = try std.fmt.allocPrint(arena, "╭─ KARTU: {s} ({d}) ", .{ active_col.title, active_col.cards.items.len });
+        try ltw.print("\x1b[1;36m{s}", .{ltitle});
+        const ltitle_vis = stringWidth(ltitle);
+        if (left_w > ltitle_vis + 1) {
+            for (0..(left_w - ltitle_vis - 1)) |_| try ltw.writeAll("─");
+        }
+        try ltw.writeAll("╮\x1b[0m");
+        try left_lines.append(arena, ltop_buf.items);
+
+        // Card items
+        if (active_col.cards.items.len == 0) {
+            var empty_buf: std.ArrayList(u8) = .empty;
+            var ew = style_mod.bufferWriter(arena, &empty_buf);
+            try ew.writeAll("\x1b[1;36m│\x1b[0m \x1b[90m(Belum ada kartu di kolom ini)\x1b[0m");
+            const evis = stringWidth(" (Belum ada kartu di kolom ini)");
+            if (left_inner_w > evis) {
+                for (0..(left_inner_w - evis)) |_| try ew.writeAll(" ");
+            }
+            try ew.writeAll("\x1b[1;36m│\x1b[0m");
+            try left_lines.append(arena, empty_buf.items);
+        } else {
             var scroll_start: usize = 0;
             if (self.selected_card >= avail_card_rows) {
                 scroll_start = self.selected_card - avail_card_rows + 1;
@@ -333,145 +338,272 @@ pub const KanbanBoard = struct {
 
             for (active_col.cards.items[scroll_start..scroll_end], scroll_start..) |card, k_idx| {
                 const is_card = (k_idx == self.selected_card);
-                const max_title_w = if (left_w >= 14) left_w - 14 else 10;
+                const max_title_w = if (left_inner_w >= 14) left_inner_w - 14 else 10;
                 const trunc_title = try truncateWidth(arena, card.title, max_title_w);
 
-                var badge_symbol: []const u8 = "";
+                var badge_glyph: []const u8 = "  ";
                 if (card.badge) |bdg| {
                     if (std.mem.indexOf(u8, bdg.text, "Kritis") != null) {
-                        badge_symbol = "🔴 ";
+                        badge_glyph = "🔴";
                     } else if (std.mem.indexOf(u8, bdg.text, "Penting") != null) {
-                        badge_symbol = "🟡 ";
+                        badge_glyph = "🟡";
                     } else if (std.mem.indexOf(u8, bdg.text, "Rendah") != null) {
-                        badge_symbol = "🟢 ";
+                        badge_glyph = "🟢";
                     }
                 }
 
                 var card_item_buf: std.ArrayList(u8) = .empty;
                 var cw = style_mod.bufferWriter(arena, &card_item_buf);
 
+                try cw.writeAll("\x1b[1;36m│\x1b[0m");
                 if (is_card) {
-                    try cw.print("\x1b[1;93m► #{s} {s}{s}\x1b[0m", .{ card.id, badge_symbol, trunc_title });
+                    try cw.print("\x1b[7;1;36m❯\x1b[0m \x1b[1;97m#{s} {s} {s}\x1b[0m", .{ card.id, badge_glyph, trunc_title });
                 } else {
-                    try cw.print("\x1b[37m  #{s} {s}{s}\x1b[0m", .{ card.id, badge_symbol, trunc_title });
+                    try cw.print("  \x1b[90m#{s}\x1b[0m \x1b[37m{s} {s}\x1b[0m", .{ card.id, badge_glyph, trunc_title });
                 }
+
+                // Pad row
+                const prefix_w: usize = 2;
+                const cur_item_vis = prefix_w + 1 + stringWidth(card.id) + 1 + stringWidth(badge_glyph) + 1 + stringWidth(trunc_title);
+                if (left_inner_w > cur_item_vis) {
+                    for (0..(left_inner_w - cur_item_vis)) |_| try cw.writeAll(" ");
+                }
+                try cw.writeAll("\x1b[1;36m│\x1b[0m");
                 try left_lines.append(arena, card_item_buf.items);
             }
         }
 
-        // 5. Build Right Pane Lines (Card Detail Viewer)
+        // Fill remaining card rows in left pane
+        while (left_lines.items.len < avail_card_rows + 1) {
+            var pad_buf: std.ArrayList(u8) = .empty;
+            var pw = style_mod.bufferWriter(arena, &pad_buf);
+            try pw.writeAll("\x1b[1;36m│\x1b[0m");
+            for (0..left_inner_w) |_| try pw.writeAll(" ");
+            try pw.writeAll("\x1b[1;36m│\x1b[0m");
+            try left_lines.append(arena, pad_buf.items);
+        }
+
+        // Bottom Border of Left Pane
+        var lbot_buf: std.ArrayList(u8) = .empty;
+        var lbw = style_mod.bufferWriter(arena, &lbot_buf);
+        const card_count = active_col.cards.items.len;
+        const cur_pos = if (card_count > 0) self.selected_card + 1 else 0;
+        const pos_label = try std.fmt.allocPrint(arena, " {d} of {d} ─╯", .{ cur_pos, card_count });
+        try lbw.writeAll("\x1b[1;36m╰");
+        const pos_vis = stringWidth(pos_label);
+        if (left_w > pos_vis + 1) {
+            for (0..(left_w - pos_vis - 1)) |_| try lbw.writeAll("─");
+        }
+        try lbw.print("\x1b[90m{s}\x1b[0m", .{pos_label});
+        try left_lines.append(arena, lbot_buf.items);
+
+        // 5. Build Right Pane Lines (Card Detail Viewer / Live Inspector)
         var right_lines = std.ArrayList([]const u8).empty;
-        try right_lines.append(arena, "\x1b[1;96m🔍 RINCIAN KARTU (LIVE INSPECTOR)\x1b[0m");
 
         const card_opt = self.getSelectedCard();
         if (card_opt) |card| {
             // Box top
             var rtop_buf: std.ArrayList(u8) = .empty;
             var rtw = style_mod.bufferWriter(arena, &rtop_buf);
-            try rtw.print("\x1b[1;93m┌─ #{s} ", .{card.id});
-            const top_vis_w = stringWidth(card.id) + 4;
-            if (right_w > top_vis_w + 1) {
-                for (0..(right_w - top_vis_w - 1)) |_| try rtw.writeAll("─");
+            const rtop_title = try std.fmt.allocPrint(arena, "╭─ #{s} ─", .{card.id});
+            try rtw.print("\x1b[90m{s}", .{rtop_title});
+            const rtop_vis = stringWidth(rtop_title);
+            const status_pill = try std.fmt.allocPrint(arena, " 🔍 LIVE INSPECTOR: {s} ─╮", .{active_col.title});
+            const pill_vis = stringWidth(status_pill);
+
+            if (right_w > rtop_vis + pill_vis) {
+                for (0..(right_w - rtop_vis - pill_vis)) |_| try rtw.writeAll("─");
+                try rtw.print("\x1b[36m{s}\x1b[0m", .{status_pill});
+            } else {
+                if (right_w > rtop_vis + 1) {
+                    for (0..(right_w - rtop_vis - 1)) |_| try rtw.writeAll("─");
+                }
+                try rtw.writeAll("╮\x1b[0m");
             }
-            try rtw.writeAll("┐\x1b[0m");
             try right_lines.append(arena, rtop_buf.items);
 
-            // Title (wrapped if needed)
-            const detail_inner_w = if (right_w >= 4) right_w - 4 else 20;
+            // Title line (wrapped)
+            const detail_content_w = if (right_inner_w >= 14) right_inner_w - 14 else 15;
             var title_lines = std.ArrayList([]const u8).empty;
-            const title_wrap_w = if (detail_inner_w > 12) detail_inner_w - 12 else 10;
-            try wrapText(arena, card.title, title_wrap_w, &title_lines);
+            try wrapText(arena, card.title, detail_content_w, &title_lines);
 
             for (title_lines.items, 0..) |tline, idx| {
+                var tl_buf: std.ArrayList(u8) = .empty;
+                var tw = style_mod.bufferWriter(arena, &tl_buf);
+                try tw.writeAll("\x1b[90m│\x1b[0m ");
                 if (idx == 0) {
-                    try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mJudul   :\x1b[0m \x1b[1;97m{s}\x1b[0m", .{tline}));
+                    try tw.print("\x1b[90mJudul     :\x1b[0m \x1b[1;97m{s}\x1b[0m", .{tline});
+                    const tvis = 12 + stringWidth(tline);
+                    if (right_inner_w > tvis) for (0..(right_inner_w - tvis)) |_| try tw.writeAll(" ");
                 } else {
-                    try right_lines.append(arena, try std.fmt.allocPrint(arena, "│           \x1b[1;97m{s}\x1b[0m", .{tline}));
+                    try tw.print("            \x1b[1;97m{s}\x1b[0m", .{tline});
+                    const tvis = 12 + stringWidth(tline);
+                    if (right_inner_w > tvis) for (0..(right_inner_w - tvis)) |_| try tw.writeAll(" ");
                 }
+                try tw.writeAll(" \x1b[90m│\x1b[0m");
+                try right_lines.append(arena, tl_buf.items);
             }
 
-            // Column & Status
-            const icon = active_col.icon orelse "📌";
-            try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mKolom   :\x1b[0m \x1b[36m{s} {s}\x1b[0m", .{ icon, active_col.title }));
+            // Column row
+            {
+                var cl_buf: std.ArrayList(u8) = .empty;
+                var cw = style_mod.bufferWriter(arena, &cl_buf);
+                try cw.writeAll("\x1b[90m│\x1b[0m ");
+                const icon = active_col.icon orelse "📌";
+                try cw.print("\x1b[90mKolom     :\x1b[0m \x1b[36m{s} {s}\x1b[0m", .{ icon, active_col.title });
+                const cvis = 12 + stringWidth(icon) + 1 + stringWidth(active_col.title);
+                if (right_inner_w > cvis) for (0..(right_inner_w - cvis)) |_| try cw.writeAll(" ");
+                try cw.writeAll(" \x1b[90m│\x1b[0m");
+                try right_lines.append(arena, cl_buf.items);
+            }
 
+            // Priority badge row
             if (card.badge) |bdg| {
-                try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mPrioritas:\x1b[0m \x1b[93m[{s}]\x1b[0m", .{bdg.text}));
+                var bl_buf: std.ArrayList(u8) = .empty;
+                var bw = style_mod.bufferWriter(arena, &bl_buf);
+                try bw.writeAll("\x1b[90m│\x1b[0m ");
+                try bw.print("\x1b[90mPrioritas :\x1b[0m \x1b[1;93m[{s}]\x1b[0m", .{bdg.text});
+                const bvis = 12 + stringWidth(bdg.text) + 2;
+                if (right_inner_w > bvis) for (0..(right_inner_w - bvis)) |_| try bw.writeAll(" ");
+                try bw.writeAll(" \x1b[90m│\x1b[0m");
+                try right_lines.append(arena, bl_buf.items);
             }
 
+            // Date row
             if (card.date) |dt| {
-                try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mTanggal :\x1b[0m \x1b[90m{s}\x1b[0m", .{dt}));
+                var dl_buf: std.ArrayList(u8) = .empty;
+                var dw = style_mod.bufferWriter(arena, &dl_buf);
+                try dw.writeAll("\x1b[90m│\x1b[0m ");
+                try dw.print("\x1b[90mTanggal   :\x1b[0m \x1b[90m{s}\x1b[0m", .{dt});
+                const dvis = 12 + stringWidth(dt);
+                if (right_inner_w > dvis) for (0..(right_inner_w - dvis)) |_| try dw.writeAll(" ");
+                try dw.writeAll(" \x1b[90m│\x1b[0m");
+                try right_lines.append(arena, dl_buf.items);
             }
 
+            // Metadata row
             if (card.metadata) |meta| {
-                try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mPapan   :\x1b[0m \x1b[36m{s}\x1b[0m", .{meta}));
+                var ml_buf: std.ArrayList(u8) = .empty;
+                var mw = style_mod.bufferWriter(arena, &ml_buf);
+                try mw.writeAll("\x1b[90m│\x1b[0m ");
+                try mw.print("\x1b[90mPapan     :\x1b[0m \x1b[35m{s}\x1b[0m", .{meta});
+                const mvis = 12 + stringWidth(meta);
+                if (right_inner_w > mvis) for (0..(right_inner_w - mvis)) |_| try mw.writeAll(" ");
+                try mw.writeAll(" \x1b[90m│\x1b[0m");
+                try right_lines.append(arena, ml_buf.items);
             }
 
-            // Divider inside right box
+            // Section divider
             var rdiv_buf: std.ArrayList(u8) = .empty;
             var rdw = style_mod.bufferWriter(arena, &rdiv_buf);
-            try rdw.writeAll("\x1b[1;93m├");
-            if (right_w >= 2) {
-                for (0..(right_w - 2)) |_| try rdw.writeAll("─");
+            try rdw.writeAll("\x1b[90m├─ \x1b[1;92mCatatan & Uraian Teknis\x1b[0m \x1b[90m");
+            const div_title_vis = stringWidth("├─ Catatan & Uraian Teknis ");
+            if (right_w > div_title_vis + 1) {
+                for (0..(right_w - div_title_vis - 1)) |_| try rdw.writeAll("─");
             }
             try rdw.writeAll("┤\x1b[0m");
             try right_lines.append(arena, rdiv_buf.items);
 
-            // Description / Tech Notes Header
-            try right_lines.append(arena, "│ \x1b[1;92mCatatan & Uraian Teknis:\x1b[0m");
-
+            // Notes body
             if (card.details) |det| {
                 var wrapped_notes = std.ArrayList([]const u8).empty;
-                try wrapText(arena, det, detail_inner_w, &wrapped_notes);
+                const note_inner_w = if (right_inner_w >= 4) right_inner_w - 4 else 15;
+                try wrapText(arena, det, note_inner_w, &wrapped_notes);
 
-                const max_note_lines = if (height > 14) height - 14 else 8;
+                const max_note_lines = if (body_height > right_lines.items.len + 2) body_height - right_lines.items.len - 2 else 4;
                 for (wrapped_notes.items[0..@min(wrapped_notes.items.len, max_note_lines)]) |nline| {
-                    try right_lines.append(arena, try std.fmt.allocPrint(arena, "│   {s}", .{nline}));
+                    var nl_buf: std.ArrayList(u8) = .empty;
+                    var nw = style_mod.bufferWriter(arena, &nl_buf);
+                    try nw.print("\x1b[90m│\x1b[0m   \x1b[37m{s}\x1b[0m", .{nline});
+                    const nvis = 3 + stringWidth(nline);
+                    if (right_inner_w > nvis) for (0..(right_inner_w - nvis)) |_| try nw.writeAll(" ");
+                    try nw.writeAll(" \x1b[90m│\x1b[0m");
+                    try right_lines.append(arena, nl_buf.items);
                 }
                 if (wrapped_notes.items.len > max_note_lines) {
-                    try right_lines.append(arena, "│   \x1b[90m... (uraian dipotong untuk preview live)\x1b[0m");
+                    var cut_buf: std.ArrayList(u8) = .empty;
+                    var cw = style_mod.bufferWriter(arena, &cut_buf);
+                    try cw.writeAll("\x1b[90m│   ... (uraian dipotong untuk preview live)");
+                    const cvis = stringWidth("   ... (uraian dipotong untuk preview live)");
+                    if (right_inner_w > cvis) for (0..(right_inner_w - cvis)) |_| try cw.writeAll(" ");
+                    try cw.writeAll(" │\x1b[0m");
+                    try right_lines.append(arena, cut_buf.items);
                 }
             } else {
-                try right_lines.append(arena, "│   \x1b[90m(Tidak ada catatan tambahan untuk kartu ini)\x1b[0m");
+                var nodet_buf: std.ArrayList(u8) = .empty;
+                var nw = style_mod.bufferWriter(arena, &nodet_buf);
+                try nw.writeAll("\x1b[90m│   (Tidak ada catatan tambahan untuk kartu ini)");
+                const nvis = stringWidth("   (Tidak ada catatan tambahan untuk kartu ini)");
+                if (right_inner_w > nvis) for (0..(right_inner_w - nvis)) |_| try nw.writeAll(" ");
+                try nw.writeAll(" │\x1b[0m");
+                try right_lines.append(arena, nodet_buf.items);
+            }
+
+            // Fill remaining lines in right pane
+            while (right_lines.items.len < avail_card_rows + 1) {
+                var pad_buf: std.ArrayList(u8) = .empty;
+                var pw = style_mod.bufferWriter(arena, &pad_buf);
+                try pw.writeAll("\x1b[90m│\x1b[0m");
+                for (0..right_inner_w) |_| try pw.writeAll(" ");
+                try pw.writeAll("\x1b[90m│\x1b[0m");
+                try right_lines.append(arena, pad_buf.items);
             }
 
             // Box bottom
             var rbot_buf: std.ArrayList(u8) = .empty;
             var rbw = style_mod.bufferWriter(arena, &rbot_buf);
-            try rbw.writeAll("\x1b[1;93m└");
+            try rbw.writeAll("\x1b[90m╰");
             if (right_w >= 2) {
                 for (0..(right_w - 2)) |_| try rbw.writeAll("─");
             }
-            try rbw.writeAll("┘\x1b[0m");
+            try rbw.writeAll("╯\x1b[0m");
             try right_lines.append(arena, rbot_buf.items);
         } else {
-            try right_lines.append(arena, "  \x1b[90m(Pilih salah satu kartu pada pane kiri untuk membaca rincian)\x1b[0m");
+            // Empty right pane
+            var rtop_buf: std.ArrayList(u8) = .empty;
+            var rtw = style_mod.bufferWriter(arena, &rtop_buf);
+            try rtw.writeAll("\x1b[90m╭");
+            for (0..(right_w - 2)) |_| try rtw.writeAll("─");
+            try rtw.writeAll("╮\x1b[0m");
+            try right_lines.append(arena, rtop_buf.items);
+
+            var em_buf: std.ArrayList(u8) = .empty;
+            var ew = style_mod.bufferWriter(arena, &em_buf);
+            try ew.writeAll("\x1b[90m│  (Pilih salah satu kartu pada pane kiri untuk membaca rincian)");
+            const evis = stringWidth("  (Pilih salah satu kartu pada pane kiri untuk membaca rincian)");
+            if (right_inner_w > evis) for (0..(right_inner_w - evis)) |_| try ew.writeAll(" ");
+            try ew.writeAll(" │\x1b[0m");
+            try right_lines.append(arena, em_buf.items);
+
+            while (right_lines.items.len < avail_card_rows + 1) {
+                var pad_buf: std.ArrayList(u8) = .empty;
+                var pw = style_mod.bufferWriter(arena, &pad_buf);
+                try pw.writeAll("\x1b[90m│\x1b[0m");
+                for (0..right_inner_w) |_| try pw.writeAll(" ");
+                try pw.writeAll("\x1b[90m│\x1b[0m");
+                try right_lines.append(arena, pad_buf.items);
+            }
+
+            var rbot_buf: std.ArrayList(u8) = .empty;
+            var rbw = style_mod.bufferWriter(arena, &rbot_buf);
+            try rbw.writeAll("\x1b[90m╰");
+            for (0..(right_w - 2)) |_| try rbw.writeAll("─");
+            try rbw.writeAll("╯\x1b[0m");
+            try right_lines.append(arena, rbot_buf.items);
         }
 
         // 6. Merge Left and Right Lines Row by Row
-        const body_height = if (height > 6) height - 6 else 15;
         const total_render_rows = @min(body_height, @max(left_lines.items.len, right_lines.items.len));
 
         for (0..total_render_rows) |r| {
             if (r < left_lines.items.len) {
-                const lstr = left_lines.items[r];
-                try writer.writeAll(lstr);
-                const lvis = stringWidth(lstr);
-                if (left_w > lvis) {
-                    for (0..(left_w - lvis)) |_| try writer.writeAll(" ");
-                }
+                try writer.writeAll(left_lines.items[r]);
             } else {
                 for (0..left_w) |_| try writer.writeAll(" ");
             }
 
-            try writer.writeAll("\x1b[90m │ \x1b[0m");
-
             if (r < right_lines.items.len) {
-                const rstr = right_lines.items[r];
-                try writer.writeAll(rstr);
-                const rvis = stringWidth(rstr);
-                if (right_w > rvis) {
-                    for (0..(right_w - rvis)) |_| try writer.writeAll(" ");
-                }
+                try writer.writeAll(right_lines.items[r]);
             } else {
                 for (0..right_w) |_| try writer.writeAll(" ");
             }
@@ -479,22 +611,15 @@ pub const KanbanBoard = struct {
             try writer.writeAll("\n");
         }
 
-        // 7. Bottom Controls Bar
-        for (0..width) |_| {
-            try style_mod.writeStyled(writer, "─", .bright_black, .none, .{});
+        // 7. Message Status Line (Row height - 2)
+        if (self.stats_summary) |stats| {
+            try writer.print(" \x1b[32m✓\x1b[0m \x1b[37m{s}\x1b[0m \x1b[90m· Obsidian Vault tersinkronisasi\x1b[0m\n", .{stats});
+        } else {
+            try writer.writeAll(" \x1b[32m✓\x1b[0m \x1b[37mObsidian Vault tersinkronisasi\x1b[0m\n");
         }
-        try writer.writeAll("\n");
 
-        try style_mod.writeStyled(writer, " 🎮 [1-4/h/l] ", .bright_cyan, .none, .{ .bold = true });
-        try writer.writeAll("Pilih Kolom  ");
-        try style_mod.writeStyled(writer, "[↑/k / ↓/j] ", .bright_cyan, .none, .{ .bold = true });
-        try writer.writeAll("Pilih Kartu  ");
-        try style_mod.writeStyled(writer, "[Enter/Space] ", .bright_yellow, .none, .{ .bold = true });
-        try writer.writeAll("Drawer Modal  ");
-        try style_mod.writeStyled(writer, "[r] ", .bright_green, .none, .{ .bold = true });
-        try writer.writeAll("Refresh  ");
-        try style_mod.writeStyled(writer, "[q] ", .bright_red, .none, .{ .bold = true });
-        try writer.writeAll("Keluar\n");
+        // 8. Keybar Footer (Row height - 1)
+        try writer.writeAll(" \x1b[1;96m1-4\x1b[0m \x1b[37mkolom\x1b[0m   \x1b[1;96mTab\x1b[0m \x1b[37mganti\x1b[0m   \x1b[1;96m↑↓/jk\x1b[0m \x1b[37mpilih\x1b[0m   \x1b[1;96mSpace\x1b[0m \x1b[37mmodal\x1b[0m   \x1b[1;96mr\x1b[0m \x1b[37mreload\x1b[0m   \x1b[1;96mq\x1b[0m \x1b[37mkeluar\x1b[0m\n");
     }
 
     /// Render standard multi-column view
@@ -739,95 +864,80 @@ pub const KanbanBoard = struct {
         const modal_w = @min(width - 4, 78);
         const inner_w = if (modal_w >= 4) modal_w - 4 else 20;
 
-        // Top Double Border
-        try style_mod.writeStyled(writer, "╔", .bright_yellow, .none, .{ .bold = true });
-        const title_label = " 🔍 RINCIAN KARTU KANBAN (CARD DRAWER) ";
-        try style_mod.writeStyled(writer, title_label, .bright_yellow, .none, .{ .bold = true });
+        // Top Rounded Border
+        try writer.writeAll("\x1b[1;36m╭─ \x1b[1;97m🔍 RINCIAN KARTU KANBAN (CARD DRAWER)\x1b[0m \x1b[1;36m");
+        const title_label = "╭─ 🔍 RINCIAN KARTU KANBAN (CARD DRAWER) ";
         const title_w = stringWidth(title_label);
-        if (modal_w > title_w + 2) {
-            for (0..(modal_w - title_w - 2)) |_| {
-                try style_mod.writeStyled(writer, "═", .bright_yellow, .none, .{});
+        if (modal_w > title_w + 1) {
+            for (0..(modal_w - title_w - 1)) |_| {
+                try writer.writeAll("─");
             }
         }
-        try style_mod.writeStyled(writer, "╗\n", .bright_yellow, .none, .{ .bold = true });
+        try writer.writeAll("╮\x1b[0m\n");
 
         if (card_opt) |card| {
-            try writer.writeAll("║ ");
-            try style_mod.writeStyled(writer, "ID       : ", .bright_cyan, .none, .{ .bold = true });
-            try writer.print("#{s}\n", .{card.id});
-
-            try writer.writeAll("║ ");
-            try style_mod.writeStyled(writer, "Judul    : ", .bright_cyan, .none, .{ .bold = true });
-            try style_mod.writeStyled(writer, card.title, .bright_white, .none, .{ .bold = true });
-            try writer.writeAll("\n");
+            try writer.print("\x1b[1;36m│\x1b[0m \x1b[90mID       :\x1b[0m \x1b[1;97m#{s}\x1b[0m\n", .{card.id});
+            try writer.print("\x1b[1;36m│\x1b[0m \x1b[90mJudul    :\x1b[0m \x1b[1;97m{s}\x1b[0m\n", .{card.title});
 
             if (col_opt) |col| {
-                try writer.writeAll("║ ");
-                try style_mod.writeStyled(writer, "Kolom    : ", .bright_cyan, .none, .{ .bold = true });
                 const icon = col.icon orelse "📌";
-                try writer.print("{s} {s}\n", .{ icon, col.title });
+                try writer.print("\x1b[1;36m│\x1b[0m \x1b[90mKolom    :\x1b[0m \x1b[36m{s} {s}\x1b[0m\n", .{ icon, col.title });
             }
 
             if (card.badge) |bdg| {
-                try writer.writeAll("║ ");
-                try style_mod.writeStyled(writer, "Prioritas: ", .bright_cyan, .none, .{ .bold = true });
-                try writer.print("[{s}]\n", .{bdg.text});
+                try writer.print("\x1b[1;36m│\x1b[0m \x1b[90mPrioritas:\x1b[0m \x1b[1;93m[{s}]\x1b[0m\n", .{bdg.text});
             }
 
             if (card.date) |dt| {
-                try writer.writeAll("║ ");
-                try style_mod.writeStyled(writer, "Tanggal  : ", .bright_cyan, .none, .{ .bold = true });
-                try writer.print("{s}\n", .{dt});
+                try writer.print("\x1b[1;36m│\x1b[0m \x1b[90mTanggal  :\x1b[0m \x1b[90m{s}\x1b[0m\n", .{dt});
             }
 
             if (card.metadata) |meta| {
-                try writer.writeAll("║ ");
-                try style_mod.writeStyled(writer, "Metadata : ", .bright_cyan, .none, .{ .bold = true });
-                try writer.print("{s}\n", .{meta});
+                try writer.print("\x1b[1;36m│\x1b[0m \x1b[90mMetadata :\x1b[0m \x1b[35m{s}\x1b[0m\n", .{meta});
             }
 
-            try style_mod.writeStyled(writer, "╟", .bright_yellow, .none, .{});
-            for (0..(modal_w - 2)) |_| {
-                try style_mod.writeStyled(writer, "─", .bright_yellow, .none, .{});
+            try writer.writeAll("\x1b[1;36m├─ \x1b[1;92mCatatan / Uraian Teknis\x1b[0m \x1b[1;36m");
+            const div_w = stringWidth("├─ Catatan / Uraian Teknis ");
+            if (modal_w > div_w + 1) {
+                for (0..(modal_w - div_w - 1)) |_| {
+                    try writer.writeAll("─");
+                }
             }
-            try style_mod.writeStyled(writer, "╢\n", .bright_yellow, .none, .{});
-
-            try writer.writeAll("║ ");
-            try style_mod.writeStyled(writer, "Catatan / Uraian Teknis:\n", .bright_green, .none, .{ .bold = true });
+            try writer.writeAll("┤\x1b[0m\n");
 
             if (card.details) |det| {
                 var line_iter = std.mem.splitScalar(u8, det, '\n');
                 var line_count: usize = 0;
                 while (line_iter.next()) |line| {
                     if (line_count >= 15) {
-                        try writer.writeAll("║ \x1b[90m... (uraian dipotong untuk tampilan modal)\x1b[0m\n");
+                        try writer.writeAll("\x1b[1;36m│\x1b[0m \x1b[90m... (uraian dipotong untuk tampilan modal)\x1b[0m\n");
                         break;
                     }
                     const trunc = try truncateWidth(arena, line, inner_w);
-                    try writer.print("║   {s}\n", .{trunc});
+                    try writer.print("\x1b[1;36m│\x1b[0m   \x1b[37m{s}\x1b[0m\n", .{trunc});
                     line_count += 1;
                 }
             } else {
-                try writer.writeAll("║   (Tidak ada rincian tambahan untuk kartu ini)\n");
+                try writer.writeAll("\x1b[1;36m│\x1b[0m   \x1b[90m(Tidak ada rincian tambahan untuk kartu ini)\x1b[0m\n");
             }
         } else {
-            try writer.writeAll("║ (Tidak ada kartu yang terpilih)\n");
+            try writer.writeAll("\x1b[1;36m│\x1b[0m (Tidak ada kartu yang terpilih)\n");
         }
 
-        try style_mod.writeStyled(writer, "╟", .bright_yellow, .none, .{});
+        try writer.writeAll("\x1b[1;36m├─ \x1b[1;93m[ Tekan ENTER / SPACE / ESC untuk menutup rincian kartu ]\x1b[0m \x1b[1;36m");
+        const hint_w = stringWidth("├─ [ Tekan ENTER / SPACE / ESC untuk menutup rincian kartu ] ");
+        if (modal_w > hint_w + 1) {
+            for (0..(modal_w - hint_w - 1)) |_| {
+                try writer.writeAll("─");
+            }
+        }
+        try writer.writeAll("┤\x1b[0m\n");
+
+        try writer.writeAll("\x1b[1;36m╰");
         for (0..(modal_w - 2)) |_| {
-            try style_mod.writeStyled(writer, "─", .bright_yellow, .none, .{});
+            try writer.writeAll("─");
         }
-        try style_mod.writeStyled(writer, "╢\n", .bright_yellow, .none, .{});
-
-        try writer.writeAll("║ ");
-        try style_mod.writeStyled(writer, "[ Tekan ENTER / SPACE / ESC untuk menutup rincian kartu ]\n", .bright_yellow, .none, .{ .bold = true });
-
-        try style_mod.writeStyled(writer, "╚", .bright_yellow, .none, .{ .bold = true });
-        for (0..(modal_w - 2)) |_| {
-            try style_mod.writeStyled(writer, "═", .bright_yellow, .none, .{});
-        }
-        try style_mod.writeStyled(writer, "╝\n", .bright_yellow, .none, .{ .bold = true });
+        try writer.writeAll("╯\x1b[0m\n");
     }
 };
 
@@ -878,8 +988,8 @@ test "KanbanBoard initialization and navigation" {
     try board.render(w, 80, 24);
     const out = buf.items;
     try std.testing.expect(std.mem.indexOf(u8, out, "TEST KANBAN") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "MENU KOLOM KANBAN") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "RINCIAN KARTU") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "KARTU: Backlog") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "LIVE INSPECTOR") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "Refactor Database WAL") != null);
 
     // Test Column view rendering
