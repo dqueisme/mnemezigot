@@ -856,7 +856,7 @@ pub const KanbanBoard = struct {
 
         for ([_][]const u8{ line1, line2 }) |line| {
             try writer.print("\x1b[90m│\x1b[0m{s}", .{line});
-            const lvis = 2 + (if (std.mem.indexOf(u8, line, "Total") != null) 14 + 10 else 14 + 20);
+            const lvis: usize = 2 + stringWidth(line);
             if (box_inner_w > lvis) {
                 for (0..(box_inner_w - lvis)) |_| try writer.writeAll(" ");
             }
