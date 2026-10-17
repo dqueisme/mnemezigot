@@ -15,6 +15,9 @@ pub const WindowSize = terminal.WindowSize;
 pub const getWindowSize = terminal.getWindowSize;
 pub const Cursor = terminal.Cursor;
 pub const Screen = terminal.Screen;
+pub const RawMode = terminal.RawMode;
+pub const Key = terminal.Key;
+pub const readKey = terminal.readKey;
 
 pub const box = @import("tui/box.zig");
 pub const BorderStyle = box.BorderStyle;
@@ -44,6 +47,12 @@ pub const ask = prompt.ask;
 
 pub const builder = @import("tui/builder.zig");
 pub const Builder = builder.Builder;
+
+pub const kanban = @import("tui/kanban.zig");
+pub const KanbanBoard = kanban.KanbanBoard;
+pub const KanbanColumn = kanban.KanbanColumn;
+pub const KanbanCard = kanban.KanbanCard;
+pub const KanbanBadge = kanban.KanbanBadge;
 
 test {
     std.testing.refAllDecls(@This());

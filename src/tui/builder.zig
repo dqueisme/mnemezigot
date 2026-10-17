@@ -4,6 +4,7 @@ const box_mod = @import("box.zig");
 const table_mod = @import("table.zig");
 const widgets_mod = @import("widgets.zig");
 const terminal_mod = @import("terminal.zig");
+const kanban_mod = @import("kanban.zig");
 
 pub const Color = style_mod.Color;
 pub const Style = style_mod.Style;
@@ -101,6 +102,13 @@ pub const Builder = struct {
         const w = self.writer();
         try widgets_mod.progressBar(w, current, total, config);
         try w.writeAll("\n");
+        return self;
+    }
+
+    /// Embed a Kanban board into the layout output
+    pub fn kanban(self: *Builder, board: *const kanban_mod.KanbanBoard, width: u16, height: u16) !*Builder {
+        const w = self.writer();
+        try board.render(w, width, height);
         return self;
     }
 

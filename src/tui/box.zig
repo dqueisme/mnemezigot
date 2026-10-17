@@ -91,7 +91,25 @@ pub const BoxConfig = struct {
     padding_x: usize = 1,
 };
 
-/// Calculate visible display column width of UTF-8 string (treating ascii as 1 col)
+pub fn isWideChar(cp: u21) bool {
+    if (cp >= 0x1100 and cp <= 0x115F) return true;
+    if (cp >= 0x231A and cp <= 0x231B) return true;
+    if (cp >= 0x23E9 and cp <= 0x23F3) return true;
+    if (cp >= 0x25FD and cp <= 0x25FE) return true;
+    if (cp >= 0x2600 and cp <= 0x27BF) return true;
+    if (cp >= 0x2B05 and cp <= 0x2B55) return true;
+    if (cp >= 0x2E80 and cp <= 0xA4CF) return true;
+    if (cp >= 0xAC00 and cp <= 0xD7A3) return true;
+    if (cp >= 0xF900 and cp <= 0xFAFF) return true;
+    if (cp >= 0xFE10 and cp <= 0xFE19) return true;
+    if (cp >= 0xFE30 and cp <= 0xFE6F) return true;
+    if (cp >= 0xFF00 and cp <= 0xFF60) return true;
+    if (cp >= 0xFFE0 and cp <= 0xFFE6) return true;
+    if (cp >= 0x1F000 and cp <= 0x1FBFF) return true;
+    return false;
+}
+
+/// Calculate visible display column width of UTF-8 string (treating ascii as 1 col, emoji/wide as 2)
 pub fn stringWidth(s: []const u8) usize {
     var width: usize = 0;
     var i: usize = 0;
@@ -105,6 +123,14 @@ pub fn stringWidth(s: []const u8) usize {
         }
 
         const len = std.unicode.utf8ByteSequenceLength(s[i]) catch 1;
+        if (len >= 3 and i + len <= s.len) {
+            const cp = std.unicode.utf8Decode(s[i .. i + len]) catch 0;
+            if (isWideChar(cp)) {
+                width += 2;
+                i += len;
+                continue;
+            }
+        }
         width += 1;
         i += len;
     }
