@@ -573,8 +573,12 @@ pub const KanbanBoard = struct {
             // Empty right pane
             var rtop_buf: std.ArrayList(u8) = .empty;
             var rtw = style_mod.bufferWriter(arena, &rtop_buf);
-            try rtw.writeAll("\x1b[90m╭");
-            for (0..(right_w - 2)) |_| try rtw.writeAll("─");
+            const rtop_title = try std.fmt.allocPrint(arena, "╭─ 🔍 LIVE INSPECTOR: {s} ─", .{active_col.title});
+            try rtw.print("\x1b[90m{s}", .{rtop_title});
+            const rtop_vis = stringWidth(rtop_title);
+            if (right_w > rtop_vis + 1) {
+                for (0..(right_w - rtop_vis - 1)) |_| try rtw.writeAll("─");
+            }
             try rtw.writeAll("╮\x1b[0m");
             try right_lines.append(arena, rtop_buf.items);
 
