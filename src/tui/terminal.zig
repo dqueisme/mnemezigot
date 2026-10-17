@@ -116,8 +116,8 @@ pub const RawMode = struct {
             raw.lflag.IEXTEN = false;
             raw.lflag.ISIG = false;
 
-            raw.cc[std.posix.V.MIN] = 1;
-            raw.cc[std.posix.V.TIME] = 0;
+            raw.cc[@intFromEnum(std.posix.V.MIN)] = 1;
+            raw.cc[@intFromEnum(std.posix.V.TIME)] = 0;
 
             std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, raw) catch return .{ .active = false };
             return .{ .orig_termios = orig, .active = true };
@@ -132,6 +132,21 @@ pub const RawMode = struct {
         }
     }
 };
+
+/// Standard input reader for terminal interactive sessions
+pub const StdinReader = struct {
+    pub fn readByte(self: @This()) !u8 {
+        _ = self;
+        var buf: [1]u8 = undefined;
+        const n = try std.posix.read(std.posix.STDIN_FILENO, &buf);
+        if (n == 0) return error.EndOfStream;
+        return buf[0];
+    }
+};
+
+pub fn stdinReader() StdinReader {
+    return .{};
+}
 
 /// Keyboard Event / Key Code
 pub const Key = union(enum) {

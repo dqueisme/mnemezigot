@@ -18,6 +18,7 @@ pub const Screen = terminal.Screen;
 pub const RawMode = terminal.RawMode;
 pub const Key = terminal.Key;
 pub const readKey = terminal.readKey;
+pub const stdinReader = terminal.stdinReader;
 
 pub const box = @import("tui/box.zig");
 pub const BorderStyle = box.BorderStyle;
