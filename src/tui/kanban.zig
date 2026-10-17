@@ -55,6 +55,17 @@ pub const ViewMode = enum {
     columns,
 };
 
+pub const ProjectSummary = struct {
+    id: []const u8,
+    name: []const u8,
+    filename: ?[]const u8 = null,
+    total_cards: usize = 0,
+    done_cards: usize = 0,
+    in_progress_cards: usize = 0,
+    backlog_cards: usize = 0,
+    completion_rate: f64 = 0.0,
+};
+
 pub const KanbanBoard = struct {
     allocator: std.mem.Allocator,
     title: []const u8,
@@ -620,6 +631,253 @@ pub const KanbanBoard = struct {
 
         // 8. Keybar Footer (Row height - 1)
         try writer.writeAll(" \x1b[1;96m1-4\x1b[0m \x1b[37mkolom\x1b[0m   \x1b[1;96mTab\x1b[0m \x1b[37mganti\x1b[0m   \x1b[1;96m↑↓/jk\x1b[0m \x1b[37mpilih\x1b[0m   \x1b[1;96mSpace\x1b[0m \x1b[37mmodal\x1b[0m   \x1b[1;96mr\x1b[0m \x1b[37mreload\x1b[0m   \x1b[1;96mq\x1b[0m \x1b[37mkeluar\x1b[0m\n");
+    }
+
+    /// Render Project Selection screen (Step 1 of the 3-step Kanban flow)
+    pub fn renderProjectPicker(
+        self: *const KanbanBoard,
+        writer: anytype,
+        projects: []const ProjectSummary,
+        selected_project: usize,
+        term_width: u16,
+        term_height: u16,
+    ) !void {
+        var arena_state = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+
+        const width: usize = @max(@as(usize, term_width), 60);
+        const height: usize = @max(@as(usize, term_height), 20);
+
+        // 1. Top Header Band
+        var head_buf: std.ArrayList(u8) = .empty;
+        var hw = style_mod.bufferWriter(arena, &head_buf);
+        try hw.print(" \x1b[1;96m📋 {s}\x1b[0m \x1b[90m│\x1b[0m \x1b[1;97mPILIH PROYEK KANBAN\x1b[0m", .{self.title});
+        const head_vis = stringWidth(head_buf.items);
+        try writer.writeAll(head_buf.items);
+
+        const count_tag = try std.fmt.allocPrint(arena, "{d} Proyek ", .{projects.len});
+        const tag_vis = stringWidth(count_tag);
+        if (width > head_vis + tag_vis) {
+            for (0..(width - head_vis - tag_vis)) |_| try writer.writeAll(" ");
+            try writer.print("\x1b[90m{s}\x1b[0m\n", .{count_tag});
+        } else {
+            try writer.writeAll("\n");
+        }
+
+        // 2. Project List Panel Box
+        const body_height = if (height > 4) height - 4 else 15;
+        const box_inner_w = if (width >= 4) width - 4 else 56;
+
+        var top_buf: std.ArrayList(u8) = .empty;
+        var tw = style_mod.bufferWriter(arena, &top_buf);
+        const top_title = try std.fmt.allocPrint(arena, "╭─ 📁 DAFTAR PROYEK KANBAN ({d}) ", .{projects.len});
+        try tw.print("\x1b[1;36m{s}", .{top_title});
+        const top_vis = stringWidth(top_title);
+        if (width > top_vis + 1) {
+            for (0..(width - top_vis - 1)) |_| try tw.writeAll("─");
+        }
+        try tw.writeAll("╮\x1b[0m\n");
+        try writer.writeAll(top_buf.items);
+
+        const avail_rows = if (body_height >= 2) body_height - 2 else 10;
+        var row_count: usize = 0;
+
+        for (projects, 0..) |p, idx| {
+            if (row_count >= avail_rows) break;
+            const is_sel = (idx == selected_project);
+
+            var row_buf: std.ArrayList(u8) = .empty;
+            var rw = style_mod.bufferWriter(arena, &row_buf);
+            try rw.writeAll("\x1b[1;36m│\x1b[0m ");
+
+            const prefix = if (is_sel) "\x1b[7;1;36m❯\x1b[0m " else "  ";
+            const name_styled = if (is_sel)
+                try std.fmt.allocPrint(arena, "\x1b[1;97m📋 {s}\x1b[0m", .{p.name})
+            else
+                try std.fmt.allocPrint(arena, "\x1b[37m📋 {s}\x1b[0m", .{p.name});
+
+            const stat_str = try std.fmt.allocPrint(arena, "{d} kartu · {d} selesai ({d:.1}%)", .{ p.total_cards, p.done_cards, p.completion_rate });
+            const sum_str = try std.fmt.allocPrint(arena, "{d} Backlog · {d} In Progress", .{ p.backlog_cards, p.in_progress_cards });
+
+            try rw.print("{s}{s}  \x1b[36m{s}\x1b[0m  \x1b[90m({s})\x1b[0m", .{ prefix, name_styled, stat_str, sum_str });
+
+            const row_vis: usize = 2 + 1 + 2 + 1 + stringWidth(p.name) + 2 + stringWidth(stat_str) + 3 + stringWidth(sum_str) + 1;
+            if (box_inner_w > row_vis) {
+                for (0..(box_inner_w - row_vis)) |_| try rw.writeAll(" ");
+            }
+            try rw.writeAll(" \x1b[1;36m│\x1b[0m\n");
+            try writer.writeAll(row_buf.items);
+            row_count += 1;
+        }
+
+        while (row_count < avail_rows) : (row_count += 1) {
+            try writer.writeAll("\x1b[1;36m│\x1b[0m");
+            for (0..box_inner_w + 2) |_| try writer.writeAll(" ");
+            try writer.writeAll("\x1b[1;36m│\x1b[0m\n");
+        }
+
+        // Bottom border
+        var bot_buf: std.ArrayList(u8) = .empty;
+        var bw = style_mod.bufferWriter(arena, &bot_buf);
+        const cur_p = if (projects.len > 0) selected_project + 1 else 0;
+        const pos_label = try std.fmt.allocPrint(arena, " {d} of {d} ─╯", .{ cur_p, projects.len });
+        try bw.writeAll("\x1b[1;36m╰");
+        const pos_vis = stringWidth(pos_label);
+        if (width > pos_vis + 1) {
+            for (0..(width - pos_vis - 1)) |_| try bw.writeAll("─");
+        }
+        try bw.print("\x1b[90m{s}\x1b[0m\n", .{pos_label});
+        try writer.writeAll(bot_buf.items);
+
+        // 3. Message Status Line
+        try writer.print(" \x1b[32m✓\x1b[0m \x1b[37mObsidian Vault terhubung · {d} berkas papan di Boards/\x1b[0m\n", .{projects.len});
+
+        // 4. Keybar Footer
+        try writer.writeAll(" \x1b[1;96m↑↓/jk\x1b[0m \x1b[37mpilih proyek\x1b[0m   \x1b[1;96mEnter\x1b[0m \x1b[37mbuka proyek\x1b[0m   \x1b[1;96mr\x1b[0m \x1b[37mreload\x1b[0m   \x1b[1;96mq\x1b[0m \x1b[37mkeluar\x1b[0m\n");
+    }
+
+    /// Render Column Overview & Card Counts screen (Step 2 of the 3-step Kanban flow)
+    pub fn renderColumnOverview(
+        self: *const KanbanBoard,
+        writer: anytype,
+        project_name: []const u8,
+        filename: ?[]const u8,
+        selected_col_idx: usize,
+        term_width: u16,
+        term_height: u16,
+    ) !void {
+        var arena_state = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+
+        const width: usize = @max(@as(usize, term_width), 60);
+        _ = term_height;
+
+        // 1. Top Header Band
+        var head_buf: std.ArrayList(u8) = .empty;
+        var hw = style_mod.bufferWriter(arena, &head_buf);
+        try hw.print(" \x1b[1;96m📋 {s}\x1b[0m \x1b[90m│\x1b[0m \x1b[1;95mProyek: {s}\x1b[0m", .{ self.title, project_name });
+        const head_vis = stringWidth(head_buf.items);
+        try writer.writeAll(head_buf.items);
+
+        if (filename) |f| {
+            const f_vis = stringWidth(f) + 2;
+            if (width > head_vis + f_vis) {
+                for (0..(width - head_vis - f_vis)) |_| try writer.writeAll(" ");
+                try writer.print("\x1b[90m{s}\x1b[0m  \n", .{f});
+            } else {
+                try writer.writeAll("\n");
+            }
+        } else {
+            try writer.writeAll("\n");
+        }
+
+        const box_inner_w = if (width >= 4) width - 4 else 56;
+
+        // 2. Upper Panel: Column Summary Box
+        var ctop_buf: std.ArrayList(u8) = .empty;
+        var ctw = style_mod.bufferWriter(arena, &ctop_buf);
+        const col_box_title = "╭─ 📊 RINGKASAN KOLOM & JUMLAH KARTU ";
+        try ctw.print("\x1b[1;36m{s}", .{col_box_title});
+        const ctop_vis = stringWidth(col_box_title);
+        if (width > ctop_vis + 1) {
+            for (0..(width - ctop_vis - 1)) |_| try ctw.writeAll("─");
+        }
+        try ctw.writeAll("╮\x1b[0m\n");
+        try writer.writeAll(ctop_buf.items);
+
+        var total_cards: usize = 0;
+        var done_cards: usize = 0;
+
+        for (self.columns.items, 0..) |col, idx| {
+            const is_sel = (idx == selected_col_idx);
+            const num = idx + 1;
+            const icon = col.icon orelse "📌";
+            const count = col.cards.items.len;
+            total_cards += count;
+            if (std.mem.indexOf(u8, col.id, "done") != null or std.mem.indexOf(u8, col.title, "Done") != null) {
+                done_cards += count;
+            }
+
+            // Meter bar (dots or blocks)
+            const meter_dots: usize = @min(count, 30);
+            var meter_buf: [32]u8 = undefined;
+            for (0..meter_dots) |m| meter_buf[m] = '=';
+            const meter_str = meter_buf[0..meter_dots];
+
+            var crow_buf: std.ArrayList(u8) = .empty;
+            var crw = style_mod.bufferWriter(arena, &crow_buf);
+            try crw.writeAll("\x1b[1;36m│\x1b[0m ");
+
+            if (is_sel) {
+                try crw.print("\x1b[7;1;36m❯\x1b[0m \x1b[1;97m[{d}] {s} {s}\x1b[0m  \x1b[1;93m{d} kartu\x1b[0m  \x1b[36m[{s}]\x1b[0m", .{ num, icon, col.title, count, meter_str });
+            } else {
+                try crw.print("  \x1b[90m[{d}]\x1b[0m \x1b[37m{s} {s}\x1b[0m  \x1b[90m{d} kartu  [{s}]\x1b[0m", .{ num, icon, col.title, count, meter_str });
+            }
+
+            const row_vis: usize = 2 + 1 + 3 + 1 + stringWidth(icon) + 1 + stringWidth(col.title) + 2 + 6 + 2 + 1 + meter_dots + 1;
+            if (box_inner_w > row_vis) {
+                for (0..(box_inner_w - row_vis)) |_| try crw.writeAll(" ");
+            }
+            try crw.writeAll(" \x1b[1;36m│\x1b[0m\n");
+            try writer.writeAll(crow_buf.items);
+        }
+
+        // Bottom border of Column Summary Box
+        var cbot_buf: std.ArrayList(u8) = .empty;
+        var cbw = style_mod.bufferWriter(arena, &cbot_buf);
+        const cur_c = if (self.columns.items.len > 0) selected_col_idx + 1 else 0;
+        const cpos_label = try std.fmt.allocPrint(arena, " {d} of {d} ─╯", .{ cur_c, self.columns.items.len });
+        try cbw.writeAll("\x1b[1;36m╰");
+        const cpos_vis = stringWidth(cpos_label);
+        if (width > cpos_vis + 1) {
+            for (0..(width - cpos_vis - 1)) |_| try cbw.writeAll("─");
+        }
+        try cbw.print("\x1b[90m{s}\x1b[0m\n", .{cpos_label});
+        try writer.writeAll(cbot_buf.items);
+
+        // 3. Lower Panel: Project Stats Box
+        const comp_pct: f64 = if (total_cards > 0) (@as(f64, @floatFromInt(done_cards)) / @as(f64, @floatFromInt(total_cards))) * 100.0 else 0.0;
+        var stop_buf: std.ArrayList(u8) = .empty;
+        var stw = style_mod.bufferWriter(arena, &stop_buf);
+        const stat_box_title = "╭─ 📈 STATISTIK RINGKAS PROYEK ";
+        try stw.print("\x1b[90m{s}", .{stat_box_title});
+        const stop_vis = stringWidth(stat_box_title);
+        if (width > stop_vis + 1) {
+            for (0..(width - stop_vis - 1)) |_| try stw.writeAll("─");
+        }
+        try stw.writeAll("╮\x1b[0m\n");
+        try writer.writeAll(stop_buf.items);
+
+        // Stat lines
+        const line1 = try std.fmt.allocPrint(arena, "  \x1b[90mTotal Kartu :\x1b[0m \x1b[1;97m{d} kartu\x1b[0m", .{total_cards});
+        const line2 = try std.fmt.allocPrint(arena, "  \x1b[90mPenyelesaian:\x1b[0m \x1b[1;92m{d} kartu ({d:.1}% selesai)\x1b[0m", .{ done_cards, comp_pct });
+
+        for ([_][]const u8{ line1, line2 }) |line| {
+            try writer.print("\x1b[90m│\x1b[0m{s}", .{line});
+            const lvis = 2 + (if (std.mem.indexOf(u8, line, "Total") != null) 14 + 10 else 14 + 20);
+            if (box_inner_w > lvis) {
+                for (0..(box_inner_w - lvis)) |_| try writer.writeAll(" ");
+            }
+            try writer.writeAll(" \x1b[90m│\x1b[0m\n");
+        }
+
+        // Bottom of stat box
+        var sbot_buf: std.ArrayList(u8) = .empty;
+        var sbw = style_mod.bufferWriter(arena, &sbot_buf);
+        try sbw.writeAll("\x1b[90m╰");
+        if (width >= 2) {
+            for (0..(width - 2)) |_| try sbw.writeAll("─");
+        }
+        try sbw.writeAll("╯\x1b[0m\n");
+        try writer.writeAll(sbot_buf.items);
+
+        // 4. Message Status Line
+        try writer.writeAll(" \x1b[32m✓\x1b[0m \x1b[37mPilih salah satu kolom untuk menampilkan list tugas\x1b[0m\n");
+
+        // 5. Keybar Footer
+        try writer.writeAll(" \x1b[1;96m1-4/↑↓\x1b[0m \x1b[37mpilih kolom\x1b[0m   \x1b[1;96mEnter\x1b[0m \x1b[37mbuka list tugas\x1b[0m   \x1b[1;96mEsc/b\x1b[0m \x1b[37mganti proyek\x1b[0m   \x1b[1;96mr\x1b[0m \x1b[37mreload\x1b[0m   \x1b[1;96mq\x1b[0m \x1b[37mkeluar\x1b[0m\n");
     }
 
     /// Render standard multi-column view
