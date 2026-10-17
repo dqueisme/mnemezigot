@@ -115,7 +115,7 @@ pub const StdoutWriter = struct {
     }
 
     pub fn print(self: StdoutWriter, comptime fmt: []const u8, args: anytype) !void {
-        var buf: [2048]u8 = undefined;
+        var buf: [16384]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
         try self.writeAll(msg);
     }
