@@ -50,6 +50,11 @@ pub const KanbanColumn = struct {
     }
 };
 
+pub const ViewMode = enum {
+    two_pane,
+    columns,
+};
+
 pub const KanbanBoard = struct {
     allocator: std.mem.Allocator,
     title: []const u8,
@@ -59,6 +64,7 @@ pub const KanbanBoard = struct {
     selected_card: usize = 0,
     show_modal: bool = false,
     stats_summary: ?[]const u8 = null,
+    view_mode: ViewMode = .two_pane,
 
     pub fn init(allocator: std.mem.Allocator, title: []const u8) KanbanBoard {
         return .{
@@ -77,6 +83,13 @@ pub const KanbanBoard = struct {
 
     pub fn addColumn(self: *KanbanBoard, col: KanbanColumn) !void {
         try self.columns.append(self.allocator, col);
+    }
+
+    pub fn selectColumn(self: *KanbanBoard, idx: usize) void {
+        if (idx < self.columns.items.len) {
+            self.selected_col = idx;
+            self.clampSelectedCard();
+        }
     }
 
     pub fn moveLeft(self: *KanbanBoard) void {
@@ -170,7 +183,6 @@ pub const KanbanBoard = struct {
             }
 
             if (current_w + w > max_width) {
-                // Truncate and append ellipsis
                 if (max_width >= 2 and byte_idx > 0) {
                     return try std.fmt.allocPrint(allocator, "{s}…", .{str[0..byte_idx]});
                 } else {
@@ -185,8 +197,308 @@ pub const KanbanBoard = struct {
         return try allocator.dupe(u8, str);
     }
 
-    /// Render the entire Kanban board to the given writer
-    pub fn render(self: *const KanbanBoard, writer: anytype, term_width: u16, term_height: u16) !void {
+    /// Word-wrap text into lines of at most max_width display columns
+    fn wrapText(arena: std.mem.Allocator, text: []const u8, max_width: usize, out_lines: *std.ArrayList([]const u8)) !void {
+        if (max_width == 0) return;
+        var line_iter = std.mem.splitScalar(u8, text, '\n');
+        while (line_iter.next()) |raw_line| {
+            if (raw_line.len == 0) {
+                try out_lines.append(arena, "");
+                continue;
+            }
+
+            var word_iter = std.mem.tokenizeScalar(u8, raw_line, ' ');
+            var cur_buf: std.ArrayList(u8) = .empty;
+            var cur_w = style_mod.bufferWriter(arena, &cur_buf);
+            var cur_len: usize = 0;
+
+            while (word_iter.next()) |word| {
+                const w = stringWidth(word);
+                if (cur_len == 0) {
+                    try cur_w.writeAll(word);
+                    cur_len = w;
+                } else if (cur_len + 1 + w <= max_width) {
+                    try cur_w.writeAll(" ");
+                    try cur_w.writeAll(word);
+                    cur_len += 1 + w;
+                } else {
+                    try out_lines.append(arena, cur_buf.items);
+                    cur_buf = std.ArrayList(u8).empty;
+                    cur_w = style_mod.bufferWriter(arena, &cur_buf);
+                    try cur_w.writeAll(word);
+                    cur_len = w;
+                }
+            }
+            if (cur_buf.items.len > 0) {
+                try out_lines.append(arena, cur_buf.items);
+            }
+        }
+    }
+
+    /// Render the Kanban board in modern, robust 2-Pane Master-Detail layout
+    pub fn renderTwoPane(self: *const KanbanBoard, writer: anytype, term_width: u16, term_height: u16) !void {
+        var arena_state = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena_state.deinit();
+        const arena = arena_state.allocator();
+
+        const num_cols = self.columns.items.len;
+        if (num_cols == 0) {
+            try writer.writeAll("Belum ada kolom Kanban yang tersedia.\n");
+            return;
+        }
+
+        const width: usize = @max(@as(usize, term_width), 60);
+        const height: usize = @max(@as(usize, term_height), 20);
+
+        // 1. Top Header
+        try style_mod.writeStyled(writer, "📋 ", .bright_cyan, .none, .{ .bold = true });
+        try style_mod.writeStyled(writer, self.title, .bright_white, .none, .{ .bold = true });
+
+        if (self.subtitle) |sub| {
+            try writer.writeAll("  ");
+            try style_mod.writeStyled(writer, sub, .bright_black, .none, .{});
+        }
+        try writer.writeAll("\n");
+
+        if (self.stats_summary) |stats| {
+            try style_mod.writeStyled(writer, stats, .bright_yellow, .none, .{});
+            try writer.writeAll("\n");
+        }
+
+        // Header separator
+        for (0..width) |_| {
+            try style_mod.writeStyled(writer, "═", .cyan, .none, .{});
+        }
+        try writer.writeAll("\n");
+
+        // 2. Render Modal Overlay if active
+        if (self.show_modal) {
+            try self.renderModal(arena, writer, width);
+            return;
+        }
+
+        // 3. Compute Split Widths
+        var left_w = (width * 38) / 100;
+        if (left_w < 28) left_w = 28;
+        if (left_w > 45) left_w = 45;
+        const div_w: usize = 3; // " │ "
+        const right_w = if (width > left_w + div_w) width - left_w - div_w else 28;
+
+        // 4. Build Left Pane Lines (Menu Kolom + Daftar Kartu)
+        var left_lines = std.ArrayList([]const u8).empty;
+
+        try left_lines.append(arena, "\x1b[1;96m📑 MENU KOLOM KANBAN\x1b[0m");
+
+        // List columns
+        for (self.columns.items, 0..) |col, c_idx| {
+            const is_col = (c_idx == self.selected_col);
+            const num = c_idx + 1;
+            const icon = col.icon orelse "📌";
+            var line_buf: std.ArrayList(u8) = .empty;
+            var lw = style_mod.bufferWriter(arena, &line_buf);
+
+            if (is_col) {
+                try lw.print("\x1b[1;93m▶ [{d}] {s} {s} ({d})\x1b[0m", .{ num, icon, col.title, col.cards.items.len });
+            } else {
+                try lw.print("\x1b[90m  [{d}] {s} {s} ({d})\x1b[0m", .{ num, icon, col.title, col.cards.items.len });
+            }
+            try left_lines.append(arena, line_buf.items);
+        }
+
+        // Divider in left pane
+        var div_buf: std.ArrayList(u8) = .empty;
+        var dw = style_mod.bufferWriter(arena, &div_buf);
+        try dw.writeAll("\x1b[90m");
+        for (0..left_w) |_| try dw.writeAll("─");
+        try dw.writeAll("\x1b[0m");
+        try left_lines.append(arena, div_buf.items);
+
+        // Cards list of active column
+        const active_col = &self.columns.items[self.selected_col];
+        const card_header = try std.fmt.allocPrint(arena, "\x1b[1;96m📋 KARTU: {s} ({d})\x1b[0m", .{ active_col.title, active_col.cards.items.len });
+        try left_lines.append(arena, card_header);
+
+        if (active_col.cards.items.len == 0) {
+            try left_lines.append(arena, "  \x1b[90m(Belum ada kartu di kolom ini)\x1b[0m");
+        } else {
+            const body_height = if (height > 6) height - 6 else 15;
+            const menu_rows_used = self.columns.items.len + 3;
+            const avail_card_rows = if (body_height > menu_rows_used + 1) body_height - menu_rows_used - 1 else 10;
+
+            var scroll_start: usize = 0;
+            if (self.selected_card >= avail_card_rows) {
+                scroll_start = self.selected_card - avail_card_rows + 1;
+            }
+            const scroll_end = @min(active_col.cards.items.len, scroll_start + avail_card_rows);
+
+            for (active_col.cards.items[scroll_start..scroll_end], scroll_start..) |card, k_idx| {
+                const is_card = (k_idx == self.selected_card);
+                const max_title_w = if (left_w >= 14) left_w - 14 else 10;
+                const trunc_title = try truncateWidth(arena, card.title, max_title_w);
+
+                var badge_symbol: []const u8 = "";
+                if (card.badge) |bdg| {
+                    if (std.mem.indexOf(u8, bdg.text, "Kritis") != null) {
+                        badge_symbol = "🔴 ";
+                    } else if (std.mem.indexOf(u8, bdg.text, "Penting") != null) {
+                        badge_symbol = "🟡 ";
+                    } else if (std.mem.indexOf(u8, bdg.text, "Rendah") != null) {
+                        badge_symbol = "🟢 ";
+                    }
+                }
+
+                var card_item_buf: std.ArrayList(u8) = .empty;
+                var cw = style_mod.bufferWriter(arena, &card_item_buf);
+
+                if (is_card) {
+                    try cw.print("\x1b[1;93m► #{s} {s}{s}\x1b[0m", .{ card.id, badge_symbol, trunc_title });
+                } else {
+                    try cw.print("\x1b[37m  #{s} {s}{s}\x1b[0m", .{ card.id, badge_symbol, trunc_title });
+                }
+                try left_lines.append(arena, card_item_buf.items);
+            }
+        }
+
+        // 5. Build Right Pane Lines (Card Detail Viewer)
+        var right_lines = std.ArrayList([]const u8).empty;
+        try right_lines.append(arena, "\x1b[1;96m🔍 RINCIAN KARTU (LIVE INSPECTOR)\x1b[0m");
+
+        const card_opt = self.getSelectedCard();
+        if (card_opt) |card| {
+            // Box top
+            var rtop_buf: std.ArrayList(u8) = .empty;
+            var rtw = style_mod.bufferWriter(arena, &rtop_buf);
+            try rtw.print("\x1b[1;93m┌─ #{s} ", .{card.id});
+            const top_vis_w = stringWidth(card.id) + 4;
+            if (right_w > top_vis_w + 1) {
+                for (0..(right_w - top_vis_w - 1)) |_| try rtw.writeAll("─");
+            }
+            try rtw.writeAll("┐\x1b[0m");
+            try right_lines.append(arena, rtop_buf.items);
+
+            // Title (wrapped if needed)
+            const detail_inner_w = if (right_w >= 4) right_w - 4 else 20;
+            var title_lines = std.ArrayList([]const u8).empty;
+            const title_wrap_w = if (detail_inner_w > 12) detail_inner_w - 12 else 10;
+            try wrapText(arena, card.title, title_wrap_w, &title_lines);
+
+            for (title_lines.items, 0..) |tline, idx| {
+                if (idx == 0) {
+                    try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mJudul   :\x1b[0m \x1b[1;97m{s}\x1b[0m", .{tline}));
+                } else {
+                    try right_lines.append(arena, try std.fmt.allocPrint(arena, "│           \x1b[1;97m{s}\x1b[0m", .{tline}));
+                }
+            }
+
+            // Column & Status
+            const icon = active_col.icon orelse "📌";
+            try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mKolom   :\x1b[0m \x1b[36m{s} {s}\x1b[0m", .{ icon, active_col.title }));
+
+            if (card.badge) |bdg| {
+                try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mPrioritas:\x1b[0m \x1b[93m[{s}]\x1b[0m", .{bdg.text}));
+            }
+
+            if (card.date) |dt| {
+                try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mTanggal :\x1b[0m \x1b[90m{s}\x1b[0m", .{dt}));
+            }
+
+            if (card.metadata) |meta| {
+                try right_lines.append(arena, try std.fmt.allocPrint(arena, "│ \x1b[1;96mPapan   :\x1b[0m \x1b[36m{s}\x1b[0m", .{meta}));
+            }
+
+            // Divider inside right box
+            var rdiv_buf: std.ArrayList(u8) = .empty;
+            var rdw = style_mod.bufferWriter(arena, &rdiv_buf);
+            try rdw.writeAll("\x1b[1;93m├");
+            if (right_w >= 2) {
+                for (0..(right_w - 2)) |_| try rdw.writeAll("─");
+            }
+            try rdw.writeAll("┤\x1b[0m");
+            try right_lines.append(arena, rdiv_buf.items);
+
+            // Description / Tech Notes Header
+            try right_lines.append(arena, "│ \x1b[1;92mCatatan & Uraian Teknis:\x1b[0m");
+
+            if (card.details) |det| {
+                var wrapped_notes = std.ArrayList([]const u8).empty;
+                try wrapText(arena, det, detail_inner_w, &wrapped_notes);
+
+                const max_note_lines = if (height > 14) height - 14 else 8;
+                for (wrapped_notes.items[0..@min(wrapped_notes.items.len, max_note_lines)]) |nline| {
+                    try right_lines.append(arena, try std.fmt.allocPrint(arena, "│   {s}", .{nline}));
+                }
+                if (wrapped_notes.items.len > max_note_lines) {
+                    try right_lines.append(arena, "│   \x1b[90m... (uraian dipotong untuk preview live)\x1b[0m");
+                }
+            } else {
+                try right_lines.append(arena, "│   \x1b[90m(Tidak ada catatan tambahan untuk kartu ini)\x1b[0m");
+            }
+
+            // Box bottom
+            var rbot_buf: std.ArrayList(u8) = .empty;
+            var rbw = style_mod.bufferWriter(arena, &rbot_buf);
+            try rbw.writeAll("\x1b[1;93m└");
+            if (right_w >= 2) {
+                for (0..(right_w - 2)) |_| try rbw.writeAll("─");
+            }
+            try rbw.writeAll("┘\x1b[0m");
+            try right_lines.append(arena, rbot_buf.items);
+        } else {
+            try right_lines.append(arena, "  \x1b[90m(Pilih salah satu kartu pada pane kiri untuk membaca rincian)\x1b[0m");
+        }
+
+        // 6. Merge Left and Right Lines Row by Row
+        const body_height = if (height > 6) height - 6 else 15;
+        const total_render_rows = @min(body_height, @max(left_lines.items.len, right_lines.items.len));
+
+        for (0..total_render_rows) |r| {
+            if (r < left_lines.items.len) {
+                const lstr = left_lines.items[r];
+                try writer.writeAll(lstr);
+                const lvis = stringWidth(lstr);
+                if (left_w > lvis) {
+                    for (0..(left_w - lvis)) |_| try writer.writeAll(" ");
+                }
+            } else {
+                for (0..left_w) |_| try writer.writeAll(" ");
+            }
+
+            try writer.writeAll("\x1b[90m │ \x1b[0m");
+
+            if (r < right_lines.items.len) {
+                const rstr = right_lines.items[r];
+                try writer.writeAll(rstr);
+                const rvis = stringWidth(rstr);
+                if (right_w > rvis) {
+                    for (0..(right_w - rvis)) |_| try writer.writeAll(" ");
+                }
+            } else {
+                for (0..right_w) |_| try writer.writeAll(" ");
+            }
+
+            try writer.writeAll("\n");
+        }
+
+        // 7. Bottom Controls Bar
+        for (0..width) |_| {
+            try style_mod.writeStyled(writer, "─", .bright_black, .none, .{});
+        }
+        try writer.writeAll("\n");
+
+        try style_mod.writeStyled(writer, " 🎮 [1-4/h/l] ", .bright_cyan, .none, .{ .bold = true });
+        try writer.writeAll("Pilih Kolom  ");
+        try style_mod.writeStyled(writer, "[↑/k / ↓/j] ", .bright_cyan, .none, .{ .bold = true });
+        try writer.writeAll("Pilih Kartu  ");
+        try style_mod.writeStyled(writer, "[Enter/Space] ", .bright_yellow, .none, .{ .bold = true });
+        try writer.writeAll("Drawer Modal  ");
+        try style_mod.writeStyled(writer, "[r] ", .bright_green, .none, .{ .bold = true });
+        try writer.writeAll("Refresh  ");
+        try style_mod.writeStyled(writer, "[q] ", .bright_red, .none, .{ .bold = true });
+        try writer.writeAll("Keluar\n");
+    }
+
+    /// Render standard multi-column view
+    pub fn renderColumns(self: *const KanbanBoard, writer: anytype, term_width: u16, term_height: u16) !void {
         var arena_state = std.heap.ArenaAllocator.init(self.allocator);
         defer arena_state.deinit();
         const arena = arena_state.allocator();
@@ -210,31 +522,26 @@ pub const KanbanBoard = struct {
         }
         try writer.writeAll("\n");
 
-        // Stats summary line
         if (self.stats_summary) |stats| {
             try style_mod.writeStyled(writer, stats, .bright_yellow, .none, .{});
             try writer.writeAll("\n");
         }
 
-        // Header separator
         for (0..width) |_| {
             try style_mod.writeStyled(writer, "═", .cyan, .none, .{});
         }
         try writer.writeAll("\n");
 
-        // 2. Render Modal Overlay if active
         if (self.show_modal) {
             try self.renderModal(arena, writer, width);
             return;
         }
 
-        // 3. Compute Column Widths
         const gap: usize = 1;
         const total_gaps: usize = if (num_cols > 1) (num_cols - 1) * gap else 0;
         const avail_width: usize = if (width > total_gaps + 2) width - total_gaps else 40;
         const col_width: usize = @max(@as(usize, 18), avail_width / num_cols);
 
-        // 4. Generate visual line buffers for each column
         var col_lines_list = try arena.alloc(std.ArrayList([]const u8), num_cols);
         for (0..num_cols) |i| {
             col_lines_list[i] = std.ArrayList([]const u8).empty;
@@ -244,8 +551,6 @@ pub const KanbanBoard = struct {
             var lines = &col_lines_list[c_idx];
             const is_col_focused = (c_idx == self.selected_col);
 
-            // Column Header Box
-            // Top border of column header
             var top_buf: std.ArrayList(u8) = .empty;
             var top_w = style_mod.bufferWriter(arena, &top_buf);
             try top_w.writeAll("╭");
@@ -270,7 +575,6 @@ pub const KanbanBoard = struct {
                 try lines.append(arena, styled_header);
             }
 
-            // Cards in column
             if (col.cards.items.len == 0) {
                 var empty_buf: std.ArrayList(u8) = .empty;
                 var ew = style_mod.bufferWriter(arena, &empty_buf);
@@ -294,7 +598,6 @@ pub const KanbanBoard = struct {
                 for (col.cards.items, 0..) |card, k_idx| {
                     const is_card_focused = (is_col_focused and k_idx == self.selected_card);
 
-                    // Card Top Border
                     var card_top: std.ArrayList(u8) = .empty;
                     var ctw = style_mod.bufferWriter(arena, &card_top);
                     const tag_indicator = if (is_card_focused) "►" else "─";
@@ -312,7 +615,6 @@ pub const KanbanBoard = struct {
                         try lines.append(arena, try std.fmt.allocPrint(arena, "\x1b[90m{s}\x1b[0m", .{card_top.items}));
                     }
 
-                    // Card Title Line
                     const inner_w = if (col_width >= 4) col_width - 4 else 10;
                     const trunc_title = try truncateWidth(arena, card.title, inner_w);
                     var card_title: std.ArrayList(u8) = .empty;
@@ -330,7 +632,6 @@ pub const KanbanBoard = struct {
                     try ttl_w.writeAll(" │");
                     try lines.append(arena, card_title.items);
 
-                    // Card Meta/Badge Line (if available)
                     if (card.badge != null or card.date != null) {
                         var meta_buf: std.ArrayList(u8) = .empty;
                         var mw = style_mod.bufferWriter(arena, &meta_buf);
@@ -355,22 +656,6 @@ pub const KanbanBoard = struct {
                         try lines.append(arena, meta_buf.items);
                     }
 
-                    // Card Subtitle Line (if available)
-                    if (card.subtitle) |sub| {
-                        const trunc_sub = try truncateWidth(arena, sub, inner_w);
-                        var sub_buf: std.ArrayList(u8) = .empty;
-                        var sw = style_mod.bufferWriter(arena, &sub_buf);
-                        try sw.writeAll("│ ");
-                        try sw.print("\x1b[36m{s}\x1b[0m", .{trunc_sub});
-                        const sub_used = stringWidth(trunc_sub);
-                        if (inner_w > sub_used) {
-                            for (0..(inner_w - sub_used)) |_| try sw.writeAll(" ");
-                        }
-                        try sw.writeAll(" │");
-                        try lines.append(arena, sub_buf.items);
-                    }
-
-                    // Card Bottom Border
                     var card_bot: std.ArrayList(u8) = .empty;
                     var cbw = style_mod.bufferWriter(arena, &card_bot);
                     try cbw.writeAll("└");
@@ -388,7 +673,6 @@ pub const KanbanBoard = struct {
             }
         }
 
-        // 5. Merge column lines row by row
         var max_lines: usize = 0;
         for (col_lines_list) |lines| {
             if (lines.items.len > max_lines) max_lines = lines.items.len;
@@ -418,7 +702,6 @@ pub const KanbanBoard = struct {
             try writer.writeAll("\n");
         }
 
-        // 6. Bottom Controls Bar
         for (0..width) |_| {
             try style_mod.writeStyled(writer, "─", .bright_black, .none, .{});
         }
@@ -438,6 +721,14 @@ pub const KanbanBoard = struct {
         try writer.writeAll("Refresh  ");
         try style_mod.writeStyled(writer, "[q] ", .bright_red, .none, .{ .bold = true });
         try writer.writeAll("Keluar\n");
+    }
+
+    /// Render board based on active view mode (defaults to two_pane)
+    pub fn render(self: *const KanbanBoard, writer: anytype, term_width: u16, term_height: u16) !void {
+        switch (self.view_mode) {
+            .two_pane => try self.renderTwoPane(writer, term_width, term_height),
+            .columns => try self.renderColumns(writer, term_width, term_height),
+        }
     }
 
     /// Render detailed modal popup for the currently selected card
@@ -461,7 +752,6 @@ pub const KanbanBoard = struct {
         try style_mod.writeStyled(writer, "╗\n", .bright_yellow, .none, .{ .bold = true });
 
         if (card_opt) |card| {
-            // ID & Column
             try writer.writeAll("║ ");
             try style_mod.writeStyled(writer, "ID       : ", .bright_cyan, .none, .{ .bold = true });
             try writer.print("#{s}\n", .{card.id});
@@ -496,7 +786,6 @@ pub const KanbanBoard = struct {
                 try writer.print("{s}\n", .{meta});
             }
 
-            // Divider
             try style_mod.writeStyled(writer, "╟", .bright_yellow, .none, .{});
             for (0..(modal_w - 2)) |_| {
                 try style_mod.writeStyled(writer, "─", .bright_yellow, .none, .{});
@@ -525,7 +814,6 @@ pub const KanbanBoard = struct {
             try writer.writeAll("║ (Tidak ada kartu yang terpilih)\n");
         }
 
-        // Bottom border
         try style_mod.writeStyled(writer, "╟", .bright_yellow, .none, .{});
         for (0..(modal_w - 2)) |_| {
             try style_mod.writeStyled(writer, "─", .bright_yellow, .none, .{});
@@ -571,7 +859,6 @@ test "KanbanBoard initialization and navigation" {
     try std.testing.expectEqual(@as(usize, 0), board.selected_col);
     try std.testing.expectEqual(@as(usize, 0), board.selected_card);
 
-    // Navigation tests
     board.moveDown();
     try std.testing.expectEqual(@as(usize, 1), board.selected_card);
 
@@ -582,12 +869,8 @@ test "KanbanBoard initialization and navigation" {
     board.moveLeft();
     try std.testing.expectEqual(@as(usize, 0), board.selected_col);
 
-    board.toggleModal();
-    try std.testing.expect(board.show_modal);
-    board.closeModal();
-    try std.testing.expect(!board.show_modal);
-
-    // Test render to buffer
+    // Test Two-Pane rendering
+    board.view_mode = .two_pane;
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.testing.allocator);
     const w = style_mod.bufferWriter(std.testing.allocator, &buf);
@@ -595,7 +878,13 @@ test "KanbanBoard initialization and navigation" {
     try board.render(w, 80, 24);
     const out = buf.items;
     try std.testing.expect(std.mem.indexOf(u8, out, "TEST KANBAN") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Backlog") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "MENU KOLOM KANBAN") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "RINCIAN KARTU") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "Refactor Database WAL") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Done") != null);
+
+    // Test Column view rendering
+    board.view_mode = .columns;
+    buf.clearRetainingCapacity();
+    try board.render(w, 80, 24);
+    try std.testing.expect(std.mem.indexOf(u8, buf.items, "Backlog") != null);
 }
