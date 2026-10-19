@@ -54,6 +54,7 @@ pub const renderBox = box.render;
 pub const stringWidth = box.stringWidth;
 pub const truncateWidth = box.truncateWidth;
 pub const wrapText = box.wrapText;
+pub const isWideChar = box.isWideChar;
 pub const TwoPaneBorder = box.TwoPaneBorder;
 
 pub const table = @import("tui/table.zig");
