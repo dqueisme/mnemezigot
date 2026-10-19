@@ -142,6 +142,21 @@ pub const StdinReader = struct {
         if (n == 0) return error.EndOfStream;
         return buf[0];
     }
+
+    pub fn readByteTimeout(self: @This(), timeout_ms: i32) !?u8 {
+        _ = self;
+        var pfd = [1]std.posix.pollfd{.{
+            .fd = std.posix.STDIN_FILENO,
+            .events = std.posix.POLL.IN,
+            .revents = 0,
+        }};
+        const ready = try std.posix.poll(&pfd, timeout_ms);
+        if (ready == 0) return null;
+        var buf: [1]u8 = undefined;
+        const n = try std.posix.read(std.posix.STDIN_FILENO, &buf);
+        if (n == 0) return null;
+        return buf[0];
+    }
 };
 
 pub fn stdinReader() StdinReader {
@@ -175,10 +190,18 @@ pub fn readKey(reader: anytype) !Key {
     };
 
     if (b1 == 0x1b) {
-        const b2 = reader.readByte() catch |err| {
-            if (err == error.EndOfStream) return .escape;
-            return err;
+        const T = @TypeOf(reader);
+        const ActualT = switch (@typeInfo(T)) {
+            .pointer => |ptr| ptr.child,
+            else => T,
         };
+        const b2: u8 = if (@typeInfo(ActualT) == .@"struct" and @hasDecl(ActualT, "readByteTimeout"))
+            (try reader.readByteTimeout(25)) orelse return .escape
+        else
+            reader.readByte() catch |err| {
+                if (err == error.EndOfStream) return .escape;
+                return err;
+            };
 
         if (b2 == '[') {
             const b3 = reader.readByte() catch |err| {
