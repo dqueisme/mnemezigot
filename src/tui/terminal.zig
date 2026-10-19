@@ -122,6 +122,14 @@ pub const Screen = struct {
     pub fn endSync(writer: anytype) !void {
         try writer.writeAll("\x1b[?2025l");
     }
+
+    pub fn enableMouse(writer: anytype) !void {
+        try writer.writeAll("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+    }
+
+    pub fn disableMouse(writer: anytype) !void {
+        try writer.writeAll("\x1b[?1006l\x1b[?1002l\x1b[?1000l");
+    }
 };
 
 /// Terminal Raw Mode manager using POSIX termios
@@ -195,7 +203,25 @@ pub fn stdinReader() StdinReader {
     return .{};
 }
 
-/// Keyboard Event / Key Code
+pub const MouseButton = enum {
+    left,
+    middle,
+    right,
+    wheel_up,
+    wheel_down,
+    release,
+    other,
+};
+
+pub const MouseEvent = struct {
+    button: MouseButton,
+    col: u16, // 1-indexed column
+    row: u16, // 1-indexed row
+    is_press: bool,
+    code: u16 = 0,
+};
+
+/// Keyboard & Mouse Event / Input Code
 pub const Key = union(enum) {
     up,
     down,
@@ -213,6 +239,7 @@ pub const Key = union(enum) {
     ctrl: u8,
     none,
     timeout,
+    mouse: MouseEvent,
 };
 
 pub fn parseKeyFromFirstByte(reader: anytype, b1: u8) !Key {
@@ -243,6 +270,59 @@ pub fn parseKeyFromFirstByte(reader: anytype, b1: u8) !Key {
                 'D' => return .left,
                 'H' => return .home,
                 'F' => return .end,
+                '<' => {
+                    var sgr_buf: [32]u8 = undefined;
+                    var sgr_len: usize = 0;
+                    var terminator: u8 = 0;
+                    while (sgr_len < sgr_buf.len) {
+                        const ch = reader.readByte() catch |err| {
+                            if (err == error.EndOfStream) return .escape;
+                            return err;
+                        };
+                        if (ch == 'M' or ch == 'm') {
+                            terminator = ch;
+                            break;
+                        }
+                        sgr_buf[sgr_len] = ch;
+                        sgr_len += 1;
+                    }
+                    if (terminator == 0) return .escape;
+
+                    var it = std.mem.splitScalar(u8, sgr_buf[0..sgr_len], ';');
+                    const btn_str = it.next() orelse return .escape;
+                    const col_str = it.next() orelse return .escape;
+                    const row_str = it.next() orelse return .escape;
+
+                    const btn_code = std.fmt.parseInt(u16, btn_str, 10) catch return .escape;
+                    const col = std.fmt.parseInt(u16, col_str, 10) catch return .escape;
+                    const row = std.fmt.parseInt(u16, row_str, 10) catch return .escape;
+
+                    const is_press = (terminator == 'M');
+                    const button: MouseButton = if ((btn_code & 64) != 0)
+                        switch (btn_code & 3) {
+                            0 => .wheel_up,
+                            1 => .wheel_down,
+                            else => .other,
+                        }
+                    else
+                        switch (btn_code & 3) {
+                            0 => .left,
+                            1 => .middle,
+                            2 => .right,
+                            3 => .release,
+                            else => .other,
+                        };
+
+                    return Key{
+                        .mouse = .{
+                            .button = button,
+                            .col = col,
+                            .row = row,
+                            .is_press = is_press,
+                            .code = btn_code,
+                        },
+                    };
+                },
                 '1'...'9' => {
                     const b4 = reader.readByte() catch |err| {
                         if (err == error.EndOfStream) return .escape;
@@ -378,6 +458,14 @@ test "Key reader parsing" {
     try std.testing.expectEqual(Key.tab, try readKey(&r1));
     try std.testing.expectEqual(Key{ .char = 'q' }, try readKey(&r1));
     try std.testing.expectEqual(Key{ .ctrl = 'c' }, try readKey(&r1));
+
+    var r_mouse = MockReader{ .slice = "\x1b[<0;55;1M\x1b[<0;55;1m\x1b[<64;20;10M" };
+    const m1 = try readKey(&r_mouse);
+    try std.testing.expectEqual(Key{ .mouse = .{ .button = .left, .col = 55, .row = 1, .is_press = true, .code = 0 } }, m1);
+    const m2 = try readKey(&r_mouse);
+    try std.testing.expectEqual(Key{ .mouse = .{ .button = .left, .col = 55, .row = 1, .is_press = false, .code = 0 } }, m2);
+    const m3 = try readKey(&r_mouse);
+    try std.testing.expectEqual(Key{ .mouse = .{ .button = .wheel_up, .col = 20, .row = 10, .is_press = true, .code = 64 } }, m3);
 }
 
 /// Read current resident set size (RSS) of the running process (/proc/self/statm on Linux).
