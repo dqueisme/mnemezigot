@@ -300,7 +300,28 @@ pub fn readKey(reader: anytype) !Key {
 }
 
 /// Read a key press event with a millisecond timeout. Returns .timeout if no key pressed.
+/// Uses poll(2) syscall so it works with any stdin reader (TTY, pipe, etc.)
 pub fn readKeyTimeout(reader: anytype, timeout_ms: i32) !Key {
+    if (builtin.os.tag == .linux) {
+        // Use poll() to check if stdin has data (or EOF) within timeout_ms
+        const linux = std.os.linux;
+        var pfd = linux.pollfd{
+            .fd = std.posix.STDIN_FILENO,
+            .events = linux.POLL.IN,
+            .revents = 0,
+        };
+        const n = linux.poll(@ptrCast(&pfd), 1, timeout_ms);
+        if (n == 0) return .timeout; // timed out — no data
+        if (n < 0) return .timeout;  // error — treat as timeout
+        // POLLHUP or POLLERR with no POLLIN → EOF/error
+        if ((pfd.revents & linux.POLL.HUP) != 0 and (pfd.revents & linux.POLL.IN) == 0) {
+            return .none; // EOF / pipe closed
+        }
+        if ((pfd.revents & linux.POLL.IN) == 0) return .timeout;
+        // Data ready — read it
+        return readKey(reader);
+    }
+    // Fallback: check for readByteTimeout, then plain readKey
     const T = @TypeOf(reader);
     const ActualT = switch (@typeInfo(T)) {
         .pointer => |ptr| ptr.child,
