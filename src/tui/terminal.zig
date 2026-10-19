@@ -27,7 +27,23 @@ pub fn getWindowSize() WindowSize {
             };
         }
     }
-    return .{ .cols = 80, .rows = 24 };
+    var default_cols: u16 = 80;
+    var default_rows: u16 = 24;
+    if (builtin.link_libc) {
+        if (std.c.getenv("COLUMNS")) |col_ptr| {
+            const col_slice = std.mem.span(col_ptr);
+            if (std.fmt.parseInt(u16, col_slice, 10)) |c| {
+                if (c > 0) default_cols = c;
+            } else |_| {}
+        }
+        if (std.c.getenv("LINES")) |row_ptr| {
+            const row_slice = std.mem.span(row_ptr);
+            if (std.fmt.parseInt(u16, row_slice, 10)) |r| {
+                if (r > 0) default_rows = r;
+            } else |_| {}
+        }
+    }
+    return .{ .cols = default_cols, .rows = default_rows };
 }
 
 /// Cursor navigation and control
@@ -89,6 +105,22 @@ pub const Screen = struct {
 
     pub fn exitAltScreen(writer: anytype) !void {
         try writer.writeAll("\x1b[?1049l");
+    }
+
+    pub fn disableLineWrap(writer: anytype) !void {
+        try writer.writeAll("\x1b[?7l");
+    }
+
+    pub fn enableLineWrap(writer: anytype) !void {
+        try writer.writeAll("\x1b[?7h");
+    }
+
+    pub fn beginSync(writer: anytype) !void {
+        try writer.writeAll("\x1b[?2025h");
+    }
+
+    pub fn endSync(writer: anytype) !void {
+        try writer.writeAll("\x1b[?2025l");
     }
 };
 
