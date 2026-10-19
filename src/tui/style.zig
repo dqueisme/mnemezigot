@@ -176,6 +176,7 @@ pub const Palette = struct {
     };
 };
 
+pub const OneDark = Palette.OneDark;
 pub const Theme = Palette;
 
 test "Palette OneDark ANSI values" {

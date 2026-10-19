@@ -4,6 +4,7 @@ pub const style = @import("tui/style.zig");
 pub const Color = style.Color;
 pub const Style = style.Style;
 pub const Palette = style.Palette;
+pub const OneDark = style.OneDark;
 pub const Theme = style.Theme;
 pub const BufferWriter = style.BufferWriter;
 pub const bufferWriter = style.bufferWriter;
