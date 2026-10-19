@@ -304,3 +304,49 @@ test "Key reader parsing" {
     try std.testing.expectEqual(Key{ .char = 'q' }, try readKey(&r1));
     try std.testing.expectEqual(Key{ .ctrl = 'c' }, try readKey(&r1));
 }
+
+/// Read current resident set size (RSS) of the running process (/proc/self/statm on Linux).
+/// Returns human-readable string such as "14.2 MB", "850 KB", or "N/A".
+pub fn getProcessMemory(arena: std.mem.Allocator) []const u8 {
+    if (builtin.os.tag != .linux) return "N/A";
+    const fd_res = std.os.linux.open("/proc/self/statm", std.os.linux.O{}, 0);
+    const fd = std.posix.errno(fd_res);
+    if (fd != .SUCCESS) return "N/A";
+    const raw_fd: std.os.linux.fd_t = @intCast(fd_res);
+    defer _ = std.os.linux.close(raw_fd);
+
+    var buf: [128]u8 = undefined;
+    const read_res = std.os.linux.read(raw_fd, &buf, buf.len);
+    const r_err = std.posix.errno(read_res);
+    if (r_err != .SUCCESS) return "N/A";
+    const bytes_read: usize = @intCast(read_res);
+    const content = buf[0..bytes_read];
+
+    var it = std.mem.splitScalar(u8, content, ' ');
+    _ = it.next(); // skip total size
+    const rss_str = it.next() orelse return "N/A";
+    const pages = std.fmt.parseInt(u64, rss_str, 10) catch return "N/A";
+    const rss_bytes = pages * 4096;
+
+    if (rss_bytes >= 1024 * 1024 * 1024) {
+        const gb = @as(f64, @floatFromInt(rss_bytes)) / (1024.0 * 1024.0 * 1024.0);
+        return std.fmt.allocPrint(arena, "{d:.2} GB", .{gb}) catch "N/A";
+    } else if (rss_bytes >= 1024 * 1024) {
+        const mb = @as(f64, @floatFromInt(rss_bytes)) / (1024.0 * 1024.0);
+        return std.fmt.allocPrint(arena, "{d:.1} MB", .{mb}) catch "N/A";
+    } else if (rss_bytes >= 1024) {
+        const kb = @as(f64, @floatFromInt(rss_bytes)) / 1024.0;
+        return std.fmt.allocPrint(arena, "{d:.0} KB", .{kb}) catch "N/A";
+    } else {
+        return std.fmt.allocPrint(arena, "{d} B", .{rss_bytes}) catch "N/A";
+    }
+}
+
+pub const getProcessRealMemory = getProcessMemory;
+
+test "getProcessMemory returns valid string on Linux" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const mem = getProcessMemory(arena.allocator());
+    try std.testing.expect(mem.len > 0);
+}

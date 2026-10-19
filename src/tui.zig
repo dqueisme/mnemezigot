@@ -3,6 +3,8 @@ const std = @import("std");
 pub const style = @import("tui/style.zig");
 pub const Color = style.Color;
 pub const Style = style.Style;
+pub const Palette = style.Palette;
+pub const Theme = style.Theme;
 pub const BufferWriter = style.BufferWriter;
 pub const bufferWriter = style.bufferWriter;
 pub const StdoutWriter = style.StdoutWriter;
@@ -19,6 +21,8 @@ pub const RawMode = terminal.RawMode;
 pub const Key = terminal.Key;
 pub const readKey = terminal.readKey;
 pub const stdinReader = terminal.stdinReader;
+pub const getProcessMemory = terminal.getProcessMemory;
+pub const getProcessRealMemory = terminal.getProcessRealMemory;
 
 pub const box = @import("tui/box.zig");
 pub const BorderStyle = box.BorderStyle;
@@ -26,6 +30,9 @@ pub const BoxConfig = box.BoxConfig;
 pub const TitleAlign = box.TitleAlign;
 pub const renderBox = box.render;
 pub const stringWidth = box.stringWidth;
+pub const truncateWidth = box.truncateWidth;
+pub const wrapText = box.wrapText;
+pub const TwoPaneBorder = box.TwoPaneBorder;
 
 pub const table = @import("tui/table.zig");
 pub const Table = table.Table;

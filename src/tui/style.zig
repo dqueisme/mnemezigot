@@ -152,3 +152,33 @@ test "Color and Style ANSI formatting" {
     const str = buf.items;
     try std.testing.expect(std.mem.startsWith(u8, str, "\x1b[1m\x1b[36mHello TUI\x1b[0m"));
 }
+
+/// Predefined ANSI color palettes and themes for TUI applications
+pub const Palette = struct {
+    /// Herdr-inspired One Dark palette (https://github.com/herdrdev/herdr)
+    pub const OneDark = struct {
+        pub const accent = "\x1b[38;2;97;175;239m"; // #61afef (One Dark Blue)
+        pub const accent_bold = "\x1b[1;38;2;97;175;239m";
+        pub const panel_bg = "\x1b[48;2;40;44;52m"; // #282c34
+        pub const selection_bg = "\x1b[48;2;51;70;89m"; // #334659 (Herdr selection row)
+        pub const active_tab_bg = "\x1b[48;2;49;54;64m"; // #313640
+        pub const border_dim = "\x1b[38;2;92;99;112m"; // #5c6370 (Herdr overlay0)
+        pub const border_focus = "\x1b[38;2;97;175;239m"; // #61afef (Herdr active border)
+        pub const text = "\x1b[38;2;171;178;191m"; // #abb2bf (Herdr soft white text)
+        pub const text_bright = "\x1b[1;38;2;255;255;255m"; // #ffffff (Bold White)
+        pub const text_muted = "\x1b[38;2;92;99;112m"; // #5c6370 (Dim text)
+        pub const green = "\x1b[38;2;152;195;121m"; // #98c379 (Done / Success)
+        pub const yellow = "\x1b[38;2;229;192;123m"; // #e5c07b (In Progress / Important)
+        pub const red = "\x1b[38;2;224;108;117m"; // #e06c75 (Critical / Error)
+        pub const cyan = "\x1b[38;2;86;182;194m"; // #56b6c2 (Info / In Review)
+        pub const mauve = "\x1b[38;2;198;120;221m"; // #c678dd (Metadata / Wikilinks)
+        pub const reset = "\x1b[0m";
+    };
+};
+
+pub const Theme = Palette;
+
+test "Palette OneDark ANSI values" {
+    try std.testing.expect(Palette.OneDark.accent.len > 0);
+    try std.testing.expectEqualStrings("\x1b[0m", Palette.OneDark.reset);
+}
