@@ -30,6 +30,7 @@ pub const readKey = terminal.readKey;
 pub const stdinReader = terminal.stdinReader;
 pub const getProcessMemory = terminal.getProcessMemory;
 pub const getProcessRealMemory = terminal.getProcessRealMemory;
+pub const isPortListening = terminal.isPortListening;
 
 pub const box = @import("tui/box.zig");
 pub const BorderStyle = box.BorderStyle;

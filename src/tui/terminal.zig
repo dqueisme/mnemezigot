@@ -376,9 +376,44 @@ pub fn getProcessMemory(arena: std.mem.Allocator) []const u8 {
 
 pub const getProcessRealMemory = getProcessMemory;
 
+/// Check if a local TCP port is actively listening (/proc/net/tcp on Linux)
+pub fn isPortListening(port: u16) bool {
+    if (builtin.os.tag != .linux) return false;
+    var hex_port_buf: [8]u8 = undefined;
+    const hex_port = std.fmt.bufPrint(&hex_port_buf, ":{X:0>4}", .{port}) catch return false;
+
+    const fd_res = std.os.linux.open("/proc/net/tcp", std.os.linux.O{}, 0);
+    const fd = std.posix.errno(fd_res);
+    if (fd != .SUCCESS) return false;
+    const raw_fd: std.os.linux.fd_t = @intCast(fd_res);
+    defer _ = std.os.linux.close(raw_fd);
+
+    var buf: [8192]u8 = undefined;
+    const read_res = std.os.linux.read(raw_fd, &buf, buf.len);
+    const r_err = std.posix.errno(read_res);
+    if (r_err != .SUCCESS) return false;
+    const bytes_read: usize = @intCast(read_res);
+    const content = buf[0..bytes_read];
+
+    var it = std.mem.splitScalar(u8, content, '\n');
+    while (it.next()) |line| {
+        if (std.mem.indexOf(u8, line, hex_port) != null) {
+            if (std.mem.indexOf(u8, line, " 0A ") != null) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 test "getProcessMemory returns valid string on Linux" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const mem = getProcessMemory(arena.allocator());
     try std.testing.expect(mem.len > 0);
+}
+
+test "isPortListening checks port correctly" {
+    _ = isPortListening(8080);
+    try std.testing.expect(!isPortListening(59999));
 }
