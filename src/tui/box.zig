@@ -96,7 +96,7 @@ pub fn isWideChar(cp: u21) bool {
     if (cp >= 0x231A and cp <= 0x231B) return true;
     if (cp >= 0x23E9 and cp <= 0x23F3) return true;
     if (cp >= 0x25FD and cp <= 0x25FE) return true;
-    if (cp >= 0x2600 and cp <= 0x27BF) return true;
+    // Note: 0x2600..0x27BF are Dingbats/Misc Symbols (e.g. ✓ U+2713, ❯ U+276F, ✕ U+2715) which are single-width (1 col) in terminals.
     if (cp >= 0x2B05 and cp <= 0x2B55) return true;
     if (cp >= 0x2E80 and cp <= 0xA4CF) return true;
     if (cp >= 0xAC00 and cp <= 0xD7A3) return true;
@@ -239,4 +239,13 @@ test "Box rendering with rounded borders and title" {
     try std.testing.expect(std.mem.indexOf(u8, out, "Status") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "System OK") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "╰") != null);
+}
+
+test "stringWidth calculates single-width symbols correctly" {
+    try std.testing.expectEqual(@as(usize, 1), stringWidth("✓"));
+    try std.testing.expectEqual(@as(usize, 1), stringWidth("❯"));
+    try std.testing.expectEqual(@as(usize, 1), stringWidth("▲"));
+    try std.testing.expectEqual(@as(usize, 1), stringWidth("●"));
+    try std.testing.expectEqual(@as(usize, 1), stringWidth("·"));
+    try std.testing.expectEqual(@as(usize, 13), stringWidth("[1] · Backlog"));
 }
