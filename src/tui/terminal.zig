@@ -212,15 +212,10 @@ pub const Key = union(enum) {
     char: u8,
     ctrl: u8,
     none,
+    timeout,
 };
 
-/// Parse a key press event from an input byte stream
-pub fn readKey(reader: anytype) !Key {
-    const b1 = reader.readByte() catch |err| {
-        if (err == error.EndOfStream) return .none;
-        return err;
-    };
-
+pub fn parseKeyFromFirstByte(reader: anytype, b1: u8) !Key {
     if (b1 == 0x1b) {
         const T = @TypeOf(reader);
         const ActualT = switch (@typeInfo(T)) {
@@ -293,6 +288,33 @@ pub fn readKey(reader: anytype) !Key {
     }
 
     return .{ .char = b1 };
+}
+
+/// Parse a key press event from an input byte stream
+pub fn readKey(reader: anytype) !Key {
+    const b1 = reader.readByte() catch |err| {
+        if (err == error.EndOfStream) return .none;
+        return err;
+    };
+    return parseKeyFromFirstByte(reader, b1);
+}
+
+/// Read a key press event with a millisecond timeout. Returns .timeout if no key pressed.
+pub fn readKeyTimeout(reader: anytype, timeout_ms: i32) !Key {
+    const T = @TypeOf(reader);
+    const ActualT = switch (@typeInfo(T)) {
+        .pointer => |ptr| ptr.child,
+        else => T,
+    };
+    if (!(@typeInfo(ActualT) == .@"struct" and @hasDecl(ActualT, "readByteTimeout"))) {
+        return readKey(reader);
+    }
+    const b1_opt = reader.readByteTimeout(timeout_ms) catch |err| {
+        if (err == error.EndOfStream) return .none;
+        return err;
+    };
+    const b1 = b1_opt orelse return .timeout;
+    return parseKeyFromFirstByte(reader, b1);
 }
 
 test "Terminal cursor and screen escapes" {

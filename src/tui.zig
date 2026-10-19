@@ -28,9 +28,23 @@ pub const RawMode = terminal.RawMode;
 pub const Key = terminal.Key;
 pub const readKey = terminal.readKey;
 pub const stdinReader = terminal.stdinReader;
+pub const readKeyTimeout = terminal.readKeyTimeout;
 pub const getProcessMemory = terminal.getProcessMemory;
 pub const getProcessRealMemory = terminal.getProcessRealMemory;
 pub const isPortListening = terminal.isPortListening;
+
+pub const system = @import("tui/system.zig");
+pub const SystemMemory = system.SystemMemory;
+pub const getSystemMemory = system.getSystemMemory;
+pub const CpuSample = system.CpuSample;
+pub const CpuUsage = system.CpuUsage;
+pub const CpuSampler = system.CpuSampler;
+pub const SystemInfo = system.SystemInfo;
+pub const getSystemInfo = system.getSystemInfo;
+pub const ProcessItem = system.ProcessItem;
+pub const fetchTopProcesses = system.fetchTopProcesses;
+pub const renderGaugeBar = system.renderGaugeBar;
+
 
 pub const box = @import("tui/box.zig");
 pub const BorderStyle = box.BorderStyle;
