@@ -54,6 +54,17 @@ pub const Color = union(enum) {
             },
         }
     }
+
+    pub fn eql(self: Color, other: Color) bool {
+        const self_tag = std.meta.activeTag(self);
+        const other_tag = std.meta.activeTag(other);
+        if (self_tag != other_tag) return false;
+        return switch (self) {
+            .rgb => |s| s.r == other.rgb.r and s.g == other.rgb.g and s.b == other.rgb.b,
+            .index => |idx| idx == other.index,
+            else => true,
+        };
+    }
 };
 
 /// ANSI Text Attributes / Formatting Styles
@@ -70,6 +81,17 @@ pub const Style = struct {
     pub const none: Style = .{};
     pub const bold_only: Style = .{ .bold = true };
     pub const dim_only: Style = .{ .dim = true };
+
+    pub fn eql(self: Style, other: Style) bool {
+        return self.bold == other.bold and
+            self.dim == other.dim and
+            self.italic == other.italic and
+            self.underline == other.underline and
+            self.blink == other.blink and
+            self.inverse == other.inverse and
+            self.hidden == other.hidden and
+            self.strikethrough == other.strikethrough;
+    }
 
     pub fn writeAnsi(self: Style, writer: anytype) !void {
         if (self.bold) try writer.writeAll("\x1b[1m");

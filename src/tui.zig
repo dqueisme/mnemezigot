@@ -70,6 +70,21 @@ pub const KanbanCard = kanban.KanbanCard;
 pub const KanbanBadge = kanban.KanbanBadge;
 pub const ProjectSummary = kanban.ProjectSummary;
 
+pub const render = @import("tui/render.zig");
+pub const Rect = render.Rect;
+pub const Cell = render.Cell;
+pub const Buffer = render.Buffer;
+pub const DoubleBuffer = render.DoubleBuffer;
+
+pub const layout = @import("tui/layout.zig");
+pub const Layout = layout.Layout;
+pub const LayoutBuilder = layout.LayoutBuilder;
+pub const Constraint = layout.Constraint;
+pub const Direction = layout.Direction;
+pub const Margin = layout.Margin;
+pub const centeredRectPct = layout.centeredRectPct;
+pub const centeredRectFixed = layout.centeredRectFixed;
+
 test {
     std.testing.refAllDecls(@This());
 }
